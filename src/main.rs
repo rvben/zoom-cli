@@ -162,29 +162,38 @@ async fn main() {
             MeetingsCommand::List { user, r#type } => {
                 commands::meetings::list(&mut client, &out, &user, r#type.as_deref()).await
             }
-            MeetingsCommand::Get { id } => {
-                commands::meetings::get(&mut client, &out, id).await
+            MeetingsCommand::Get { id } => commands::meetings::get(&mut client, &out, id).await,
+            MeetingsCommand::Create {
+                topic,
+                duration,
+                start,
+                password,
+            } => {
+                commands::meetings::create(&mut client, &out, topic, duration, start, password)
+                    .await
             }
-            MeetingsCommand::Create { topic, duration, start, password } => {
-                commands::meetings::create(&mut client, &out, topic, duration, start, password).await
-            }
-            MeetingsCommand::Update { id, topic, duration, start } => {
-                commands::meetings::update(&mut client, &out, id, topic, duration, start).await
-            }
+            MeetingsCommand::Update {
+                id,
+                topic,
+                duration,
+                start,
+            } => commands::meetings::update(&mut client, &out, id, topic, duration, start).await,
             MeetingsCommand::Delete { id } => {
                 commands::meetings::delete(&mut client, &out, id).await
             }
         },
         Command::Recordings(cmd) => match cmd {
             RecordingsCommand::List { user, from, to } => {
-                commands::recordings::list(&mut client, &out, &user, from.as_deref(), to.as_deref()).await
+                commands::recordings::list(&mut client, &out, &user, from.as_deref(), to.as_deref())
+                    .await
             }
             RecordingsCommand::Get { meeting_id } => {
                 commands::recordings::get(&mut client, &out, &meeting_id).await
             }
-            RecordingsCommand::Download { meeting_id, out: out_dir } => {
-                commands::recordings::download(&mut client, &out, &meeting_id, &out_dir).await
-            }
+            RecordingsCommand::Download {
+                meeting_id,
+                out: out_dir,
+            } => commands::recordings::download(&mut client, &out, &meeting_id, &out_dir).await,
         },
         Command::Users(cmd) => match cmd {
             UsersCommand::List { status } => {

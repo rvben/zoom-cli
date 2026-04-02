@@ -94,7 +94,10 @@ mod tests {
         let err = ApiError::RateLimit;
         let msg = err.to_string();
         assert!(msg.to_lowercase().contains("rate limit") || msg.contains("Rate limit"));
-        assert!(msg.contains("100"), "should mention the 100/day meeting cap");
+        assert!(
+            msg.contains("100"),
+            "should mention the 100/day meeting cap"
+        );
     }
 
     #[test]

@@ -31,7 +31,9 @@ pub async fn list(
                     r.id.clone(),
                     r.topic.clone(),
                     r.start_time.clone(),
-                    r.duration.map(|d| format!("{d} min")).unwrap_or_else(|| "-".into()),
+                    r.duration
+                        .map(|d| format!("{d} min"))
+                        .unwrap_or_else(|| "-".into()),
                     r.recording_files
                         .as_ref()
                         .map(|f| f.len().to_string())
@@ -66,7 +68,10 @@ pub async fn get(
             ("start_time", recording.start_time.clone()),
             (
                 "duration",
-                recording.duration.map(|d| format!("{d} min")).unwrap_or_else(|| "-".into()),
+                recording
+                    .duration
+                    .map(|d| format!("{d} min"))
+                    .unwrap_or_else(|| "-".into()),
             ),
             (
                 "files",
@@ -77,22 +82,22 @@ pub async fn get(
                     .unwrap_or_else(|| "0".into()),
             ),
         ]));
-        if let Some(files) = &recording.recording_files {
-            if !files.is_empty() {
-                out.print_data("\nFiles:");
-                for f in files {
-                    let file_type = f.file_type.clone().unwrap_or_else(|| "unknown".into());
-                    let size = f
-                        .file_size
-                        .map(|s| format!("{:.1} MB", s as f64 / 1_048_576.0))
-                        .unwrap_or_else(|| "-".into());
-                    out.print_data(&format!(
-                        "  {} {} {}",
-                        file_type,
-                        size,
-                        f.download_url.as_deref().unwrap_or("-")
-                    ));
-                }
+        if let Some(files) = &recording.recording_files
+            && !files.is_empty()
+        {
+            out.print_data("\nFiles:");
+            for f in files {
+                let file_type = f.file_type.clone().unwrap_or_else(|| "unknown".into());
+                let size = f
+                    .file_size
+                    .map(|s| format!("{:.1} MB", s as f64 / 1_048_576.0))
+                    .unwrap_or_else(|| "-".into());
+                out.print_data(&format!(
+                    "  {} {} {}",
+                    file_type,
+                    size,
+                    f.download_url.as_deref().unwrap_or("-")
+                ));
             }
         }
     }
@@ -139,7 +144,13 @@ pub async fn download(
         let safe_topic: String = recording
             .topic
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
 
         let filename = format!(
@@ -154,10 +165,7 @@ pub async fn download(
         out.print_message(&format!("Downloading {} → {}", file_type, dest.display()));
 
         let bytes = client.download_recording_file(download_url, &dest).await?;
-        out.print_message(&format!(
-            "  {:.1} MB written",
-            bytes as f64 / 1_048_576.0
-        ));
+        out.print_message(&format!("  {:.1} MB written", bytes as f64 / 1_048_576.0));
         downloaded += 1;
     }
 
@@ -176,7 +184,10 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_out() -> OutputConfig {
-        OutputConfig { json: true, quiet: true }
+        OutputConfig {
+            json: true,
+            quiet: true,
+        }
     }
 
     #[tokio::test]
@@ -191,10 +202,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
-        list(&mut client, &test_out(), "me", None, None).await.unwrap();
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        list(&mut client, &test_out(), "me", None, None)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -220,9 +232,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         get(&mut client, &test_out(), "abc123").await.unwrap();
     }
 
@@ -235,9 +246,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         let err = get(&mut client, &test_out(), "nope").await.unwrap_err();
         assert!(matches!(err, ApiError::NotFound(_)));
     }

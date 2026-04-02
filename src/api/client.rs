@@ -1,7 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use super::ApiError;
 use super::types::*;
@@ -97,12 +97,7 @@ impl ZoomClient {
     async fn get<T: DeserializeOwned>(&mut self, path: &str) -> Result<T, ApiError> {
         let url = format!("{}{}", self.base_url, path);
         let token = self.ensure_token().await?.to_owned();
-        let resp = self
-            .http
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await?;
+        let resp = self.http.get(&url).bearer_auth(&token).send().await?;
         self.handle_response(resp).await
     }
 
@@ -156,12 +151,7 @@ impl ZoomClient {
     async fn delete(&mut self, path: &str) -> Result<(), ApiError> {
         let url = format!("{}{}", self.base_url, path);
         let token = self.ensure_token().await?.to_owned();
-        let resp = self
-            .http
-            .delete(&url)
-            .bearer_auth(&token)
-            .send()
-            .await?;
+        let resp = self.http.delete(&url).bearer_auth(&token).send().await?;
         self.handle_empty_response(resp).await
     }
 
@@ -295,7 +285,8 @@ impl ZoomClient {
     }
 
     pub async fn get_recording(&mut self, meeting_id: &str) -> Result<CloudRecording, ApiError> {
-        self.get(&format!("/meetings/{meeting_id}/recordings")).await
+        self.get(&format!("/meetings/{meeting_id}/recordings"))
+            .await
     }
 
     /// Download a recording file to disk. Handles Zoom's auth-required downloads.
@@ -317,7 +308,9 @@ impl ZoomClient {
 
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-            return Err(ApiError::Auth("Not authorized to download this recording".into()));
+            return Err(ApiError::Auth(
+                "Not authorized to download this recording".into(),
+            ));
         }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -327,9 +320,9 @@ impl ZoomClient {
             });
         }
 
-        let mut file = tokio::fs::File::create(dest_path)
-            .await
-            .map_err(|e| ApiError::Other(format!("Cannot create file {}: {e}", dest_path.display())))?;
+        let mut file = tokio::fs::File::create(dest_path).await.map_err(|e| {
+            ApiError::Other(format!("Cannot create file {}: {e}", dest_path.display()))
+        })?;
 
         let mut bytes_written: u64 = 0;
         let mut stream = resp.bytes_stream();

@@ -1,5 +1,5 @@
-use crate::api::{ApiError, ZoomClient};
 use crate::api::types::{CreateMeetingRequest, UpdateMeetingRequest};
+use crate::api::{ApiError, ZoomClient};
 use crate::output::{self, OutputConfig};
 
 pub async fn list(
@@ -31,7 +31,9 @@ pub async fn list(
                     m.id.to_string(),
                     m.topic.clone(),
                     m.start_time.clone().unwrap_or_else(|| "-".into()),
-                    m.duration.map(|d| format!("{d} min")).unwrap_or_else(|| "-".into()),
+                    m.duration
+                        .map(|d| format!("{d} min"))
+                        .unwrap_or_else(|| "-".into()),
                 ]
             })
             .collect();
@@ -60,9 +62,21 @@ pub async fn get(
         out.print_data(&output::kv_block(&[
             ("id", meeting.id.to_string()),
             ("topic", meeting.topic.clone()),
-            ("start_time", meeting.start_time.clone().unwrap_or_else(|| "-".into())),
-            ("duration", meeting.duration.map(|d| format!("{d} min")).unwrap_or_else(|| "-".into())),
-            ("status", meeting.status.clone().unwrap_or_else(|| "-".into())),
+            (
+                "start_time",
+                meeting.start_time.clone().unwrap_or_else(|| "-".into()),
+            ),
+            (
+                "duration",
+                meeting
+                    .duration
+                    .map(|d| format!("{d} min"))
+                    .unwrap_or_else(|| "-".into()),
+            ),
+            (
+                "status",
+                meeting.status.clone().unwrap_or_else(|| "-".into()),
+            ),
             ("join_url", output::hyperlink(&join_url)),
         ]));
     }
@@ -148,7 +162,10 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_out() -> OutputConfig {
-        OutputConfig { json: true, quiet: true }
+        OutputConfig {
+            json: true,
+            quiet: true,
+        }
     }
 
     #[tokio::test]
@@ -162,9 +179,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         list(&mut client, &test_out(), "me", None).await.unwrap();
     }
 
@@ -182,12 +198,18 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
-        create(&mut client, &test_out(), "New Meeting".into(), Some(30), None, None)
-            .await
-            .unwrap();
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        create(
+            &mut client,
+            &test_out(),
+            "New Meeting".into(),
+            Some(30),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -199,9 +221,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         delete(&mut client, &test_out(), 111222333).await.unwrap();
     }
 
@@ -214,9 +235,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         let err = get(&mut client, &test_out(), 999).await.unwrap_err();
         assert!(matches!(err, ApiError::NotFound(_)));
     }
@@ -230,11 +250,17 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
-        update(&mut client, &test_out(), 123, Some("Updated".into()), None, None)
-            .await
-            .unwrap();
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        update(
+            &mut client,
+            &test_out(),
+            123,
+            Some("Updated".into()),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     }
 }

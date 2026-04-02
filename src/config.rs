@@ -57,7 +57,11 @@ impl Config {
                 )
             })?;
 
-        Ok(Self { account_id, client_id, client_secret })
+        Ok(Self {
+            account_id,
+            client_id,
+            client_secret,
+        })
     }
 }
 
@@ -130,9 +134,13 @@ fn normalize(value: Option<String>) -> Option<String> {
 
 pub fn schema_config_path_description() -> &'static str {
     #[cfg(not(target_os = "windows"))]
-    { "~/.config/zoom-cli/config.toml (or $XDG_CONFIG_HOME/zoom-cli/config.toml)" }
+    {
+        "~/.config/zoom-cli/config.toml (or $XDG_CONFIG_HOME/zoom-cli/config.toml)"
+    }
     #[cfg(target_os = "windows")]
-    { "%APPDATA%\\zoom-cli\\config.toml" }
+    {
+        "%APPDATA%\\zoom-cli\\config.toml"
+    }
 }
 
 #[cfg(test)]
@@ -154,12 +162,16 @@ mod tests {
     fn load_reads_default_profile_from_file() {
         let _lock = ProcessEnvLock::acquire().unwrap();
         let dir = TempDir::new().unwrap();
-        write_config(dir.path(), r#"
+        write_config(
+            dir.path(),
+            r#"
 [default]
 account_id = "acct-001"
 client_id = "cid-001"
 client_secret = "csec-001"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let _cfg_dir = set_config_dir_env(dir.path());
         let _env = clear_zoom_env();
@@ -174,12 +186,16 @@ client_secret = "csec-001"
     fn load_env_vars_override_file() {
         let _lock = ProcessEnvLock::acquire().unwrap();
         let dir = TempDir::new().unwrap();
-        write_config(dir.path(), r#"
+        write_config(
+            dir.path(),
+            r#"
 [default]
 account_id = "file-account"
 client_id = "file-client"
 client_secret = "file-secret"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let _cfg_dir = set_config_dir_env(dir.path());
         let _acct = EnvVarGuard::set("ZOOM_ACCOUNT_ID", "env-account");
@@ -189,19 +205,26 @@ client_secret = "file-secret"
 
         let cfg = Config::load(None).unwrap();
         assert_eq!(cfg.account_id, "env-account", "env var must win over file");
-        assert_eq!(cfg.client_id, "file-client", "file value used when env absent");
+        assert_eq!(
+            cfg.client_id, "file-client",
+            "file value used when env absent"
+        );
     }
 
     #[test]
     fn load_blank_env_vars_fall_back_to_file() {
         let _lock = ProcessEnvLock::acquire().unwrap();
         let dir = TempDir::new().unwrap();
-        write_config(dir.path(), r#"
+        write_config(
+            dir.path(),
+            r#"
 [default]
 account_id = "acct"
 client_id = "cid"
 client_secret = "csec"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let _cfg_dir = set_config_dir_env(dir.path());
         let _acct = EnvVarGuard::set("ZOOM_ACCOUNT_ID", "   ");
@@ -230,7 +253,9 @@ client_secret = "csec"
     fn load_named_profile_from_file() {
         let _lock = ProcessEnvLock::acquire().unwrap();
         let dir = TempDir::new().unwrap();
-        write_config(dir.path(), r#"
+        write_config(
+            dir.path(),
+            r#"
 [default]
 account_id = "def-acct"
 client_id = "def-cid"
@@ -240,7 +265,9 @@ client_secret = "def-csec"
 account_id = "work-acct"
 client_id = "work-cid"
 client_secret = "work-csec"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let _cfg_dir = set_config_dir_env(dir.path());
         let _env = clear_zoom_env();
@@ -254,7 +281,9 @@ client_secret = "work-csec"
     fn load_zoom_profile_env_selects_named_profile() {
         let _lock = ProcessEnvLock::acquire().unwrap();
         let dir = TempDir::new().unwrap();
-        write_config(dir.path(), r#"
+        write_config(
+            dir.path(),
+            r#"
 [default]
 account_id = "def-acct"
 client_id = "def-cid"
@@ -264,7 +293,9 @@ client_secret = "def-csec"
 account_id = "staging-acct"
 client_id = "staging-cid"
 client_secret = "staging-csec"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let _cfg_dir = set_config_dir_env(dir.path());
         let _acct = EnvVarGuard::unset("ZOOM_ACCOUNT_ID");
@@ -280,12 +311,16 @@ client_secret = "staging-csec"
     fn load_unknown_profile_returns_descriptive_error() {
         let _lock = ProcessEnvLock::acquire().unwrap();
         let dir = TempDir::new().unwrap();
-        write_config(dir.path(), r#"
+        write_config(
+            dir.path(),
+            r#"
 [work]
 account_id = "w-acct"
 client_id = "w-cid"
 client_secret = "w-csec"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let _cfg_dir = set_config_dir_env(dir.path());
         let _env = clear_zoom_env();

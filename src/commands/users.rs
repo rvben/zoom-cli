@@ -33,10 +33,7 @@ pub async fn list(
                 ]
             })
             .collect();
-        out.print_data(&output::table(
-            &["ID", "EMAIL", "NAME", "STATUS"],
-            &rows,
-        ));
+        out.print_data(&output::table(&["ID", "EMAIL", "NAME", "STATUS"], &rows));
         if let Some(total) = result.total_records {
             out.print_message(&format!("{total} user(s) total"));
         }
@@ -52,17 +49,15 @@ pub async fn get(
     let user = client.get_user(id_or_email).await?;
 
     if out.json {
-        out.print_data(
-            &serde_json::to_string_pretty(&user).expect("serialize"),
-        );
+        out.print_data(&serde_json::to_string_pretty(&user).expect("serialize"));
     } else {
-        let name = user.display_name.clone()
-            .or_else(|| {
-                match (&user.first_name, &user.last_name) {
-                    (Some(f), Some(l)) => Some(format!("{f} {l}")),
-                    (Some(f), None) => Some(f.clone()),
-                    _ => None,
-                }
+        let name = user
+            .display_name
+            .clone()
+            .or_else(|| match (&user.first_name, &user.last_name) {
+                (Some(f), Some(l)) => Some(format!("{f} {l}")),
+                (Some(f), None) => Some(f.clone()),
+                _ => None,
             })
             .unwrap_or_default();
         out.print_data(&output::kv_block(&[
@@ -87,7 +82,10 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_out_json() -> OutputConfig {
-        OutputConfig { json: true, quiet: true }
+        OutputConfig {
+            json: true,
+            quiet: true,
+        }
     }
 
     #[tokio::test]
@@ -104,9 +102,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         list(&mut client, &test_out_json(), None).await.unwrap();
     }
 
@@ -119,10 +116,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
-        let err = get(&mut client, &test_out_json(), "nobody@example.com").await.unwrap_err();
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        let err = get(&mut client, &test_out_json(), "nobody@example.com")
+            .await
+            .unwrap_err();
         assert!(matches!(err, ApiError::NotFound(_)));
     }
 
@@ -137,9 +135,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut client = ZoomClient::new_for_test(
-            format!("{}/v2", server.uri()), server.uri(), "tok".into()
-        );
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         me(&mut client, &test_out_json()).await.unwrap();
     }
 }

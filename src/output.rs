@@ -105,7 +105,11 @@ pub fn table(headers: &[&str], rows: &[Vec<String>]) -> String {
         .collect::<Vec<_>>()
         .join("  ");
 
-    let sep: String = widths.iter().map(|w| "-".repeat(*w)).collect::<Vec<_>>().join("  ");
+    let sep: String = widths
+        .iter()
+        .map(|w| "-".repeat(*w))
+        .collect::<Vec<_>>()
+        .join("  ");
 
     let data_lines: Vec<String> = rows
         .iter()
@@ -158,10 +162,7 @@ mod tests {
     #[test]
     fn table_pads_to_widest_cell() {
         let headers = ["NAME"];
-        let rows = vec![
-            vec!["short".into()],
-            vec!["much longer name".into()],
-        ];
+        let rows = vec![vec!["short".into()], vec!["much longer name".into()]];
         let out = table(&headers, &rows);
         let lines: Vec<&str> = out.lines().collect();
         assert!(lines[1].len() >= "much longer name".len());
@@ -169,8 +170,17 @@ mod tests {
 
     #[test]
     fn exit_codes_for_error_maps_correctly() {
-        assert_eq!(exit_codes::for_error(&ApiError::Auth("x".into())), exit_codes::CONFIG_ERROR);
-        assert_eq!(exit_codes::for_error(&ApiError::NotFound("x".into())), exit_codes::NOT_FOUND);
-        assert_eq!(exit_codes::for_error(&ApiError::RateLimit), exit_codes::GENERAL_ERROR);
+        assert_eq!(
+            exit_codes::for_error(&ApiError::Auth("x".into())),
+            exit_codes::CONFIG_ERROR
+        );
+        assert_eq!(
+            exit_codes::for_error(&ApiError::NotFound("x".into())),
+            exit_codes::NOT_FOUND
+        );
+        assert_eq!(
+            exit_codes::for_error(&ApiError::RateLimit),
+            exit_codes::GENERAL_ERROR
+        );
     }
 }

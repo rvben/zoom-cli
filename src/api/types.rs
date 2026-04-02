@@ -218,7 +218,13 @@ mod tests {
         assert_eq!(json["topic"], "Demo");
         assert_eq!(json["duration"], 45);
         assert_eq!(json["type"], 2);
-        assert!(json.get("start_time").is_none(), "None fields must be omitted");
-        assert!(json.get("password").is_none(), "None fields must be omitted");
+        assert!(
+            json.get("start_time").is_none(),
+            "None fields must be omitted"
+        );
+        assert!(
+            json.get("password").is_none(),
+            "None fields must be omitted"
+        );
     }
 }

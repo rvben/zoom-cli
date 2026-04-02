@@ -26,14 +26,20 @@ impl EnvVarGuard {
         let original = std::env::var(name).ok();
         // SAFETY: test-only helper, single-threaded via ProcessEnvLock
         unsafe { std::env::set_var(name, value) };
-        Self { name: name.to_owned(), original }
+        Self {
+            name: name.to_owned(),
+            original,
+        }
     }
 
     pub fn unset(name: &str) -> Self {
         let original = std::env::var(name).ok();
         // SAFETY: test-only helper, single-threaded via ProcessEnvLock
         unsafe { std::env::remove_var(name) };
-        Self { name: name.to_owned(), original }
+        Self {
+            name: name.to_owned(),
+            original,
+        }
     }
 }
 
