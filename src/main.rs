@@ -42,6 +42,10 @@ enum Command {
     #[command(subcommand, arg_required_else_help = true)]
     Users(UsersCommand),
 
+    /// Meeting and usage reports
+    #[command(subcommand, arg_required_else_help = true)]
+    Reports(ReportsCommand),
+
     /// Print schema/field reference for a resource
     Schema {
         /// Resource name: meetings, recordings, users
@@ -89,6 +93,13 @@ enum MeetingsCommand {
     },
     /// Delete a meeting
     Delete { id: u64 },
+    /// End a live meeting
+    End { id: u64 },
+    /// List participants from a past meeting
+    Participants {
+        /// Meeting ID or UUID
+        meeting_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -149,6 +160,21 @@ enum UsersCommand {
     Me,
 }
 
+#[derive(Subcommand)]
+enum ReportsCommand {
+    /// Meeting summary report for a user
+    Meetings {
+        #[arg(long, default_value = "me")]
+        user: String,
+        /// Start date (YYYY-MM-DD)
+        #[arg(long)]
+        from: String,
+        /// End date (YYYY-MM-DD, default: today)
+        #[arg(long)]
+        to: Option<String>,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -201,6 +227,10 @@ async fn main() {
             MeetingsCommand::Delete { id } => {
                 commands::meetings::delete(&mut client, &out, id).await
             }
+            MeetingsCommand::End { id } => commands::meetings::end(&mut client, &out, id).await,
+            MeetingsCommand::Participants { meeting_id } => {
+                commands::meetings::participants(&mut client, &out, &meeting_id).await
+            }
         },
         Command::Recordings(cmd) => match cmd {
             RecordingsCommand::List { user, from, to } => {
@@ -235,6 +265,11 @@ async fn main() {
                 commands::users::get(&mut client, &out, &id_or_email).await
             }
             UsersCommand::Me => commands::users::me(&mut client, &out).await,
+        },
+        Command::Reports(cmd) => match cmd {
+            ReportsCommand::Meetings { user, from, to } => {
+                commands::reports::meetings(&mut client, &out, &user, &from, to.as_deref()).await
+            }
         },
         Command::Schema { .. } | Command::Completions { .. } => unreachable!(),
     };

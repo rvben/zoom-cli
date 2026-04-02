@@ -162,6 +162,84 @@ pub struct RecordingControlRequest {
     pub action: String,
 }
 
+// ── Meeting status ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct MeetingStatusRequest {
+    pub action: String,
+}
+
+// ── Participants ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Participant {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub join_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leave_time: Option<String>,
+    // Duration in seconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ParticipantList {
+    pub participants: Vec<Participant>,
+    #[serde(skip_serializing_if = "is_none_or_empty")]
+    pub next_page_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_records: Option<u64>,
+    #[serde(skip_serializing)]
+    pub page_count: Option<u32>,
+    #[serde(skip_serializing)]
+    pub page_size: Option<u32>,
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MeetingReportItem {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uuid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_minutes: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub participants_count: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UserMeetingReportList {
+    pub meetings: Vec<MeetingReportItem>,
+    #[serde(skip_serializing_if = "is_none_or_empty")]
+    pub next_page_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_records: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(skip_serializing)]
+    pub page_count: Option<u32>,
+    #[serde(skip_serializing)]
+    pub page_size: Option<u32>,
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -365,5 +443,54 @@ mod tests {
             json.get("password").is_none(),
             "None fields must be omitted"
         );
+    }
+
+    #[test]
+    fn participant_list_deserializes() {
+        let json = r#"{
+            "participants": [
+                {
+                    "id": "u1",
+                    "name": "Alice",
+                    "user_email": "alice@example.com",
+                    "join_time": "2026-04-01T10:00:00Z",
+                    "leave_time": "2026-04-01T11:00:00Z",
+                    "duration": 3600
+                }
+            ],
+            "total_records": 1,
+            "page_size": 300,
+            "next_page_token": ""
+        }"#;
+        let list: ParticipantList = serde_json::from_str(json).unwrap();
+        assert_eq!(list.participants.len(), 1);
+        assert_eq!(list.participants[0].name, Some("Alice".into()));
+        assert_eq!(list.participants[0].duration, Some(3600));
+        // page internals and empty token must not serialize
+        let v: serde_json::Value = serde_json::to_value(&list).unwrap();
+        assert!(v.get("page_size").is_none());
+        assert!(v.get("next_page_token").is_none());
+    }
+
+    #[test]
+    fn meeting_report_list_deserializes() {
+        let json = r#"{
+            "meetings": [
+                {
+                    "uuid": "abc==",
+                    "id": 123,
+                    "topic": "Standup",
+                    "start_time": "2026-04-01T09:00:00Z",
+                    "duration": 30,
+                    "participants_count": 5
+                }
+            ],
+            "total_records": 1,
+            "from": "2026-04-01",
+            "to": "2026-04-30"
+        }"#;
+        let list: UserMeetingReportList = serde_json::from_str(json).unwrap();
+        assert_eq!(list.meetings.len(), 1);
+        assert_eq!(list.meetings[0].participants_count, Some(5));
     }
 }

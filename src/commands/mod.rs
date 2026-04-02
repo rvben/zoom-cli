@@ -1,5 +1,6 @@
 pub mod meetings;
 pub mod recordings;
+pub mod reports;
 pub mod users;
 
 use crate::output::OutputConfig;
@@ -41,6 +42,14 @@ pub fn schema(resource: &str, out: &OutputConfig) {
                 "delete": {
                     "description": "Delete a meeting",
                     "args": { "id": "Meeting ID" }
+                },
+                "end": {
+                    "description": "End a live meeting",
+                    "args": { "id": "Meeting ID" }
+                },
+                "participants": {
+                    "description": "List participants from a past meeting",
+                    "args": { "meeting_id": "Meeting ID or UUID" }
                 }
             },
             "fields": {
@@ -116,8 +125,30 @@ pub fn schema(resource: &str, out: &OutputConfig) {
                 "user_type": "u8 — 1=Basic 2=Licensed 3=On-Prem"
             }
         }),
+        "reports" => serde_json::json!({
+            "resource": "reports",
+            "commands": {
+                "meetings": {
+                    "description": "Meeting summary report for a user",
+                    "flags": {
+                        "--from": "(required) Start date (YYYY-MM-DD)",
+                        "--to": "End date (YYYY-MM-DD, default: today)",
+                        "--user": "User ID or 'me' (default: me)"
+                    }
+                }
+            },
+            "fields": {
+                "id": "u64 — meeting ID",
+                "uuid": "string — meeting UUID",
+                "topic": "string",
+                "start_time": "string — ISO 8601",
+                "duration": "u32 — minutes",
+                "participants_count": "u32",
+                "total_minutes": "u32 — total participant-minutes"
+            }
+        }),
         _ => {
-            eprintln!("Unknown resource '{resource}'. Available: meetings, recordings, users");
+            eprintln!("Unknown resource '{resource}'. Available: meetings, recordings, reports, users");
             std::process::exit(1);
         }
     };

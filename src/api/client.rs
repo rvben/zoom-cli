@@ -148,6 +148,19 @@ impl ZoomClient {
         self.handle_empty_response(resp).await
     }
 
+    async fn put<B: Serialize>(&mut self, path: &str, body: &B) -> Result<(), ApiError> {
+        let url = format!("{}{}", self.base_url, path);
+        let token = self.ensure_token().await?.to_owned();
+        let resp = self
+            .http
+            .put(&url)
+            .bearer_auth(&token)
+            .json(body)
+            .send()
+            .await?;
+        self.handle_empty_response(resp).await
+    }
+
     async fn delete(&mut self, path: &str) -> Result<(), ApiError> {
         let url = format!("{}{}", self.base_url, path);
         let token = self.ensure_token().await?.to_owned();
@@ -245,6 +258,14 @@ impl ZoomClient {
         self.delete(&format!("/meetings/{meeting_id}")).await
     }
 
+    pub async fn end_meeting(&mut self, meeting_id: u64) -> Result<(), ApiError> {
+        self.put(
+            &format!("/meetings/{meeting_id}/status"),
+            &MeetingStatusRequest { action: "end".into() },
+        )
+        .await
+    }
+
     // ── Users ─────────────────────────────────────────────────────────────────
 
     pub async fn list_users(&mut self, status: Option<&str>) -> Result<UserList, ApiError> {
@@ -259,6 +280,20 @@ impl ZoomClient {
 
     pub async fn get_user(&mut self, user_id: &str) -> Result<User, ApiError> {
         self.get(&format!("/users/{user_id}")).await
+    }
+
+    // ── Participants ─────────────────────────────────────────────────────────────
+
+    pub async fn list_past_meeting_participants(
+        &mut self,
+        meeting_id: &str,
+    ) -> Result<ParticipantList, ApiError> {
+        let encoded_id = meeting_id.replace('/', "%2F");
+        self.get_with_query(
+            &format!("/past_meetings/{encoded_id}/participants"),
+            &[("page_size", "300")],
+        )
+        .await
     }
 
     // ── Recordings ───────────────────────────────────────────────────────────
@@ -354,6 +389,24 @@ impl ZoomClient {
             .map_err(|e| ApiError::Other(format!("Flush error: {e}")))?;
 
         Ok(bytes_written)
+    }
+
+    // ── Reports ───────────────────────────────────────────────────────────────
+
+    pub async fn list_user_meeting_reports(
+        &mut self,
+        user_id: &str,
+        from: &str,
+        to: Option<&str>,
+    ) -> Result<UserMeetingReportList, ApiError> {
+        let mut params: Vec<(&str, &str)> = vec![("from", from), ("page_size", "300")];
+        let to_owned;
+        if let Some(t) = to {
+            to_owned = t.to_owned();
+            params.push(("to", to_owned.as_str()));
+        }
+        self.get_with_query(&format!("/report/users/{user_id}/meetings"), &params)
+            .await
     }
 }
 
@@ -532,5 +585,55 @@ mod tests {
         let list = client.list_users(None).await.unwrap();
         assert_eq!(list.users.len(), 1);
         assert_eq!(list.users[0].email, "alice@example.com");
+    }
+
+    #[tokio::test]
+    async fn end_meeting_sends_put_with_action() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/v2/meetings/123456/status"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        let mut client = mock_client(&server).await;
+        client.end_meeting(123456).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_past_meeting_participants_returns_list() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v2/past_meetings/abc123/participants"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "participants": [
+                    {"name": "Alice", "user_email": "alice@example.com", "duration": 1800}
+                ],
+                "total_records": 1
+            })))
+            .mount(&server)
+            .await;
+        let mut client = mock_client(&server).await;
+        let list = client.list_past_meeting_participants("abc123").await.unwrap();
+        assert_eq!(list.participants.len(), 1);
+        assert_eq!(list.participants[0].name, Some("Alice".into()));
+    }
+
+    #[tokio::test]
+    async fn list_user_meeting_reports_sends_from_param() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v2/report/users/me/meetings"))
+            .and(query_param("from", "2026-04-01"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meetings": [],
+                "total_records": 0,
+                "from": "2026-04-01",
+                "to": "2026-04-30"
+            })))
+            .mount(&server)
+            .await;
+        let mut client = mock_client(&server).await;
+        let list = client.list_user_meeting_reports("me", "2026-04-01", None).await.unwrap();
+        assert_eq!(list.meetings.len(), 0);
     }
 }
