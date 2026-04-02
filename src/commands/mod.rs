@@ -87,10 +87,10 @@ pub fn schema(resource: &str, out: &OutputConfig) {
                     "flags": { "--out": "Output directory (default: .)" }
                 },
                 "delete": {
-                    "description": "Delete all cloud recordings for a meeting",
+                    "description": "Delete all cloud recordings for a meeting (default: moves to trash)",
                     "args": { "meeting_id": "Meeting ID or UUID" },
                     "flags": {
-                        "--trash": "Move to trash instead of permanently deleting (default: true)"
+                        "--permanent": "Permanently delete immediately instead of moving to trash (irreversible)"
                     }
                 }
             },

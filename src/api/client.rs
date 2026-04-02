@@ -98,35 +98,47 @@ impl ZoomClient {
         Ok(token_resp.access_token)
     }
 
-    /// Send a request, retrying on HTTP 429 with exponential backoff.
+    /// Send a request, retrying on HTTP 429 (rate limit) and HTTP 401 (expired token).
     ///
     /// `build` is called once per attempt and receives the HTTP client and bearer
     /// token. It must produce a `RequestBuilder` that is ready to send. The
     /// closure is `Fn` so it can be called multiple times without moving values.
     ///
-    /// The `Retry-After` response header is honoured when present; otherwise the
-    /// delay starts at 1 s and doubles up to 60 s.
+    /// **Rate limiting (429):** retried up to `MAX_RETRY_ATTEMPTS` times with
+    /// exponential backoff (1 s → 2 s → 4 s, max 60 s). The `Retry-After`
+    /// response header is honoured when present.
+    ///
+    /// **Expired token (401):** the cached token is invalidated and a fresh one
+    /// is fetched, then the request is retried exactly once. This handles the
+    /// ~3600 s token lifetime transparently.
     async fn send_with_retry(
         &mut self,
         build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, ApiError> {
         let mut delay = std::time::Duration::from_secs(1);
+        let mut token_refreshed = false;
+
         for attempt in 0..MAX_RETRY_ATTEMPTS {
-            // Ensure we have a valid token before each attempt (cached after first call).
             let token = self.ensure_token().await?.to_owned();
             let resp = build(&self.http, &token).send().await?;
 
-            let is_last_attempt = attempt + 1 >= MAX_RETRY_ATTEMPTS;
-            if resp.status().as_u16() != 429 || is_last_attempt {
-                return Ok(resp);
+            match resp.status().as_u16() {
+                401 if !token_refreshed => {
+                    // Token may have expired — discard it and retry with a fresh one.
+                    self.token = None;
+                    token_refreshed = true;
+                    continue;
+                }
+                429 if attempt + 1 < MAX_RETRY_ATTEMPTS => {
+                    let wait = retry_after_duration(&resp).unwrap_or(delay);
+                    tokio::time::sleep(wait).await;
+                    delay = (delay * 2).min(std::time::Duration::from_secs(60));
+                    continue;
+                }
+                _ => return Ok(resp),
             }
-
-            // 429 and we have retries remaining: wait before the next attempt.
-            let wait = retry_after_duration(&resp).unwrap_or(delay);
-            tokio::time::sleep(wait).await;
-            delay = (delay * 2).min(std::time::Duration::from_secs(60));
         }
-        // Unreachable: the loop always returns via the early-return above.
+        // Unreachable: every branch either returns or continues.
         unreachable!()
     }
 
@@ -682,6 +694,46 @@ mod tests {
         let mut client = mock_client(&server).await;
         let err = client.list_meetings("me", None).await.unwrap_err();
         assert!(matches!(err, ApiError::RateLimit));
+    }
+
+    #[tokio::test]
+    async fn expired_token_is_refreshed_transparently() {
+        let server = MockServer::start().await;
+
+        // OAuth endpoint — called when the cached token is cleared after a 401.
+        Mock::given(method("POST"))
+            .and(path("/oauth/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "fresh-token",
+                "token_type": "bearer",
+                "expires_in": 3599
+            })))
+            .mount(&server)
+            .await;
+
+        // First request: 401 (expired token).
+        Mock::given(method("GET"))
+            .and(path("/v2/users/me/meetings"))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("token expired"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Second request: same endpoint, fresh token — succeeds.
+        Mock::given(method("GET"))
+            .and(path("/v2/users/me/meetings"))
+            .and(header("authorization", "Bearer fresh-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meetings": [{"id": 1, "topic": "After refresh"}],
+                "total_records": 1
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        let list = client.list_meetings("me", None).await.unwrap();
+        assert_eq!(list.meetings[0].topic, "After refresh");
     }
 
     #[tokio::test]

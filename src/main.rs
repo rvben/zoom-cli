@@ -140,9 +140,9 @@ enum RecordingsCommand {
     Delete {
         /// Meeting ID or UUID
         meeting_id: String,
-        /// Move to trash instead of permanently deleting (default behaviour)
-        #[arg(long, default_value_t = true)]
-        trash: bool,
+        /// Permanently delete instead of moving to trash (irreversible)
+        #[arg(long)]
+        permanent: bool,
     },
     /// Start cloud recording for a live meeting
     Start {
@@ -293,8 +293,8 @@ async fn main() {
             RecordingsCommand::Resume { meeting_id } => {
                 commands::recordings::control(&mut client, &out, meeting_id, "resume").await
             }
-            RecordingsCommand::Delete { meeting_id, trash } => {
-                commands::recordings::delete(&mut client, &out, &meeting_id, trash).await
+            RecordingsCommand::Delete { meeting_id, permanent } => {
+                commands::recordings::delete(&mut client, &out, &meeting_id, !permanent).await
             }
         },
         Command::Users(cmd) => match cmd {
