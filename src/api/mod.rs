@@ -116,6 +116,18 @@ mod tests {
     }
 
     #[test]
+    fn api_error_scope_message_is_actionable() {
+        // Simulates what parse_zoom_error produces for a code-4711 response.
+        let err = ApiError::Api {
+            status: 400,
+            message: "Missing required OAuth scope: report:read:user:admin\nAdd this scope to your Zoom Server-to-Server OAuth app, then run `zoom init` to update credentials.".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("report:read:user:admin"));
+        assert!(msg.contains("zoom init"), "must tell user how to fix it");
+    }
+
+    #[test]
     fn other_error_display_is_verbatim() {
         let err = ApiError::Other("unexpected failure".into());
         assert_eq!(err.to_string(), "unexpected failure");

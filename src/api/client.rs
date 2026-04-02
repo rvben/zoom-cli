@@ -14,6 +14,41 @@ const ZOOM_OAUTH_BASE: &str = "https://zoom.us";
 /// 4 attempts = initial + 3 retries.
 const MAX_RETRY_ATTEMPTS: u32 = 4;
 
+/// Extract a human-readable message from a Zoom API error body.
+///
+/// Zoom wraps errors as `{"code": N, "message": "..."}`. We unwrap that and,
+/// for known patterns, add actionable guidance beyond the raw API message.
+fn parse_zoom_error(body: &str) -> String {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(body) else {
+        return body.trim().to_owned();
+    };
+
+    let message = match val["message"].as_str() {
+        Some(m) => m.to_owned(),
+        None => return body.to_owned(),
+    };
+
+    // Code 4711: token is valid but missing a required OAuth scope.
+    // Extract the scope name and give actionable instructions.
+    if val["code"].as_u64() == Some(4711) || message.contains("does not contain scopes") {
+        let scope = message
+            .find('[')
+            .and_then(|s| message.find(']').map(|e| &message[s + 1..e]))
+            .unwrap_or("");
+        let what = if scope.is_empty() {
+            message.clone()
+        } else {
+            format!("Missing required OAuth scope: {scope}")
+        };
+        return format!(
+            "{what}\nAdd this scope to your Zoom Server-to-Server OAuth app, \
+             then run `zoom init` to update credentials."
+        );
+    }
+
+    message
+}
+
 pub struct ZoomClient {
     http: reqwest::Client,
     base_url: String,
@@ -91,7 +126,7 @@ impl ZoomClient {
             let body = resp.text().await.unwrap_or_default();
             return Err(ApiError::Api {
                 status: status.as_u16(),
-                message: body,
+                message: parse_zoom_error(&body),
             });
         }
 
@@ -255,18 +290,18 @@ impl ZoomClient {
             200..=299 => Ok(resp.json::<T>().await?),
             401 | 403 => {
                 let body = resp.text().await.unwrap_or_default();
-                Err(ApiError::Auth(body))
+                Err(ApiError::Auth(parse_zoom_error(&body)))
             }
             404 => {
                 let body = resp.text().await.unwrap_or_default();
-                Err(ApiError::NotFound(body))
+                Err(ApiError::NotFound(parse_zoom_error(&body)))
             }
             429 => Err(ApiError::RateLimit),
             _ => {
                 let body = resp.text().await.unwrap_or_default();
                 Err(ApiError::Api {
                     status: status.as_u16(),
-                    message: body,
+                    message: parse_zoom_error(&body),
                 })
             }
         }
@@ -278,18 +313,18 @@ impl ZoomClient {
             200..=299 => Ok(()),
             401 | 403 => {
                 let body = resp.text().await.unwrap_or_default();
-                Err(ApiError::Auth(body))
+                Err(ApiError::Auth(parse_zoom_error(&body)))
             }
             404 => {
                 let body = resp.text().await.unwrap_or_default();
-                Err(ApiError::NotFound(body))
+                Err(ApiError::NotFound(parse_zoom_error(&body)))
             }
             429 => Err(ApiError::RateLimit),
             _ => {
                 let body = resp.text().await.unwrap_or_default();
                 Err(ApiError::Api {
                     status: status.as_u16(),
-                    message: body,
+                    message: parse_zoom_error(&body),
                 })
             }
         }
@@ -476,7 +511,7 @@ impl ZoomClient {
             let body = resp.text().await.unwrap_or_default();
             return Err(ApiError::Api {
                 status: status.as_u16(),
-                message: body,
+                message: parse_zoom_error(&body),
             });
         }
 
@@ -593,6 +628,34 @@ mod tests {
     use super::*;
     use wiremock::matchers::{header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn parse_zoom_error_extracts_message_from_json() {
+        assert_eq!(
+            parse_zoom_error(r#"{"code":3001,"message":"Meeting does not exist"}"#),
+            "Meeting does not exist"
+        );
+    }
+
+    #[test]
+    fn parse_zoom_error_scope_4711_gives_actionable_message() {
+        let body = r#"{"code":4711,"message":"Invalid access token, does not contain scopes:[report:read:user:admin]."}"#;
+        let msg = parse_zoom_error(body);
+        assert!(
+            msg.contains("report:read:user:admin"),
+            "must name the missing scope"
+        );
+        assert!(msg.contains("zoom init"), "must tell user how to fix it");
+        assert!(
+            !msg.contains("Invalid access token"),
+            "must not echo the raw API message"
+        );
+    }
+
+    #[test]
+    fn parse_zoom_error_falls_back_to_raw_body_for_non_json() {
+        assert_eq!(parse_zoom_error("plain text error"), "plain text error");
+    }
 
     async fn mock_client(server: &MockServer) -> ZoomClient {
         ZoomClient::new_for_test(
