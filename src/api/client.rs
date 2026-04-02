@@ -98,47 +98,50 @@ impl ZoomClient {
         Ok(token_resp.access_token)
     }
 
-    /// Send a request, retrying on HTTP 429 (rate limit) and HTTP 401 (expired token).
+    /// Send a request with automatic token refresh on 401 (exactly one refresh).
     ///
-    /// `build` is called once per attempt and receives the HTTP client and bearer
-    /// token. It must produce a `RequestBuilder` that is ready to send. The
-    /// closure is `Fn` so it can be called multiple times without moving values.
+    /// This is the inner layer: it handles expired tokens but not rate limiting.
+    async fn send_once(
+        &mut self,
+        build: &impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, ApiError> {
+        let token = self.ensure_token().await?.to_owned();
+        let resp = build(&self.http, &token).send().await?;
+        if resp.status().as_u16() == 401 {
+            // Token may have expired — discard it, fetch a fresh one, retry once.
+            self.token = None;
+            let token = self.ensure_token().await?.to_owned();
+            return Ok(build(&self.http, &token).send().await?);
+        }
+        Ok(resp)
+    }
+
+    /// Send a request, retrying on HTTP 429 with exponential backoff and
+    /// refreshing the bearer token transparently on HTTP 401.
     ///
-    /// **Rate limiting (429):** retried up to `MAX_RETRY_ATTEMPTS` times with
-    /// exponential backoff (1 s → 2 s → 4 s, max 60 s). The `Retry-After`
-    /// response header is honoured when present.
-    ///
-    /// **Expired token (401):** the cached token is invalidated and a fresh one
-    /// is fetched, then the request is retried exactly once. This handles the
-    /// ~3600 s token lifetime transparently.
+    /// The two retry concerns are independent:
+    /// - **Expired token (401):** handled by `send_once`, which refreshes and
+    ///   retries exactly once. This does not consume a rate-limit retry slot.
+    /// - **Rate limiting (429):** retried up to `MAX_RETRY_ATTEMPTS` times with
+    ///   exponential backoff (1 s → 2 s → 4 s, max 60 s). The `Retry-After`
+    ///   response header is honoured when present.
     async fn send_with_retry(
         &mut self,
         build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, ApiError> {
         let mut delay = std::time::Duration::from_secs(1);
-        let mut token_refreshed = false;
-
         for attempt in 0..MAX_RETRY_ATTEMPTS {
-            let token = self.ensure_token().await?.to_owned();
-            let resp = build(&self.http, &token).send().await?;
-
-            match resp.status().as_u16() {
-                401 if !token_refreshed => {
-                    // Token may have expired — discard it and retry with a fresh one.
-                    self.token = None;
-                    token_refreshed = true;
-                    continue;
-                }
-                429 if attempt + 1 < MAX_RETRY_ATTEMPTS => {
-                    let wait = retry_after_duration(&resp).unwrap_or(delay);
-                    tokio::time::sleep(wait).await;
-                    delay = (delay * 2).min(std::time::Duration::from_secs(60));
-                    continue;
-                }
-                _ => return Ok(resp),
+            let resp = self.send_once(&build).await?;
+            let is_last = attempt + 1 >= MAX_RETRY_ATTEMPTS;
+            if resp.status().as_u16() != 429 || is_last {
+                return Ok(resp);
             }
+            let wait = retry_after_duration(&resp).unwrap_or(delay);
+            tokio::time::sleep(wait).await;
+            delay = (delay * 2).min(std::time::Duration::from_secs(60));
         }
-        // Unreachable: every branch either returns or continues.
+        // Every iteration either returns or sleeps and loops; the loop always
+        // terminates via the early return on the last attempt.
         unreachable!()
     }
 
@@ -676,6 +679,46 @@ mod tests {
         let list = client.list_meetings("me", None).await.unwrap();
         assert_eq!(list.meetings.len(), 1, "result from the retry attempt");
         assert_eq!(list.meetings[0].topic, "After retry");
+    }
+
+    #[tokio::test]
+    async fn rate_limit_then_expired_token_does_not_panic() {
+        // Regression test: 429 on first attempts then 401 on the last attempt
+        // previously hit the unreachable!() branch and panicked.
+        let server = MockServer::start().await;
+
+        // OAuth endpoint for token refresh triggered by the 401.
+        Mock::given(method("POST"))
+            .and(path("/oauth/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "fresh-token",
+                "token_type": "bearer",
+                "expires_in": 3599
+            })))
+            .mount(&server)
+            .await;
+
+        // First three requests: 429 (rate limited).
+        Mock::given(method("GET"))
+            .and(path("/v2/users/me/meetings"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
+            .up_to_n_times(3)
+            .mount(&server)
+            .await;
+
+        // After the 429 retries, the next attempt gets a 401 (expired token).
+        // send_once refreshes the token and retries — that retry also returns 401
+        // (genuinely bad credentials), which is returned as ApiError::Auth.
+        Mock::given(method("GET"))
+            .and(path("/v2/users/me/meetings"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("invalid token"))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        let err = client.list_meetings("me", None).await.unwrap_err();
+        // Must not panic; must surface as an auth error.
+        assert!(matches!(err, ApiError::Auth(_)));
     }
 
     #[tokio::test]
