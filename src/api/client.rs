@@ -285,7 +285,10 @@ impl ZoomClient {
     }
 
     pub async fn get_recording(&mut self, meeting_id: &str) -> Result<CloudRecording, ApiError> {
-        self.get(&format!("/meetings/{meeting_id}/recordings"))
+        // Zoom meeting UUIDs can contain '/' (base64 chars); encode it so the
+        // character is not interpreted as a path separator.
+        let encoded_id = meeting_id.replace('/', "%2F");
+        self.get(&format!("/meetings/{encoded_id}/recordings"))
             .await
     }
 

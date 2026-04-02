@@ -153,11 +153,21 @@ pub async fn download(
             })
             .collect();
 
+        // Use recording_type (e.g. "shared_screen_with_speaker_view") as the
+        // filename discriminator; multiple files of the same file_type (e.g.
+        // two MP4 tracks) each have a distinct recording_type and won't
+        // overwrite each other.
+        let discriminator = file
+            .recording_type
+            .as_deref()
+            .unwrap_or(file_type)
+            .to_lowercase()
+            .replace(' ', "_");
         let filename = format!(
             "{}_{}_{}.{}",
             safe_topic,
             recording.start_time.replace(':', "-").replace('T', "_"),
-            file_type.to_lowercase(),
+            discriminator,
             ext
         );
         let dest = dir.join(&filename);
