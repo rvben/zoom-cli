@@ -316,6 +316,65 @@ pub fn write_profile(
     Ok(())
 }
 
+fn write_config_file(path: &Path, content: &str) -> Result<(), ApiError> {
+    use std::io::Write;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| ApiError::Other(format!("Cannot write config: {e}")))?;
+        file.write_all(content.as_bytes())
+            .map_err(|e| ApiError::Other(format!("Write error: {e}")))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, content.as_bytes())
+            .map_err(|e| ApiError::Other(format!("Cannot write config: {e}")))?;
+    }
+    Ok(())
+}
+
+/// Remove a named profile from the config file.
+///
+/// Returns `Ok(())` if removed, `Err(ApiError::NotFound)` if the profile
+/// doesn't exist, and `Err(ApiError::Other(...))` for IO/parse failures.
+pub fn delete_profile(path: &Path, profile_name: &str) -> Result<(), ApiError> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ApiError::NotFound(format!(
+                "Config file not found: {}",
+                path.display()
+            )));
+        }
+        Err(e) => return Err(ApiError::Other(format!("Failed to read config: {e}"))),
+    };
+
+    let mut table: toml::Table =
+        toml::from_str(&content).map_err(|e| ApiError::Other(format!("Invalid config: {e}")))?;
+
+    // Both "default" and named profiles are stored as top-level TOML keys.
+    let existed = table.remove(profile_name).is_some();
+
+    if !existed {
+        return Err(ApiError::NotFound(format!(
+            "Profile '{}' not found.",
+            profile_name
+        )));
+    }
+
+    let new_content = toml::to_string_pretty(&table)
+        .map_err(|e| ApiError::Other(format!("Failed to serialize config: {e}")))?;
+
+    write_config_file(path, &new_content)?;
+    Ok(())
+}
+
 pub fn schema_config_path_description() -> &'static str {
     #[cfg(not(target_os = "windows"))]
     {

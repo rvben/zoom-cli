@@ -78,6 +78,14 @@ enum Command {
 enum ConfigCommand {
     /// Show current configuration: profiles, active profile, and env overrides
     Show,
+    /// Delete a profile from the config file
+    Delete {
+        /// Profile name to delete
+        profile: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -256,6 +264,10 @@ async fn main() {
             commands::config::show(cli.profile.as_deref(), &out);
             return;
         }
+        Command::Config(ConfigCommand::Delete { profile, force }) => {
+            commands::config::delete(profile, *force, &out);
+            return;
+        }
         Command::Init { profile } => {
             if let Err(e) = commands::init::init(profile.clone()).await {
                 eprintln!("{e}");
@@ -387,7 +399,7 @@ async fn main() {
             }
             WebinarsCommand::Get { id } => commands::webinars::get(&mut client, &out, id).await,
         },
-        Command::Config(_)
+        Command::Config(ConfigCommand::Show | ConfigCommand::Delete { .. })
         | Command::Init { .. }
         | Command::Schema { .. }
         | Command::Completions { .. } => {

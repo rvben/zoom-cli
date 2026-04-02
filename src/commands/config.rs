@@ -87,6 +87,34 @@ pub fn show(profile_arg: Option<&str>, out: &OutputConfig) {
     }
 }
 
+pub fn delete(profile_name: &str, force: bool, out: &OutputConfig) {
+    let config_path = config::config_path();
+
+    if !force {
+        eprint!("Delete profile '{profile_name}'? [y/N] ");
+        use std::io::{BufRead, IsTerminal};
+        if !std::io::stdin().is_terminal() {
+            eprintln!();
+            eprintln!("Use --force to delete non-interactively.");
+            return;
+        }
+        let mut input = String::new();
+        std::io::stdin().lock().read_line(&mut input).unwrap_or(0);
+        if input.trim().to_lowercase() != "y" {
+            out.print_message("Aborted.");
+            return;
+        }
+    }
+
+    match config::delete_profile(&config_path, profile_name) {
+        Ok(()) => out.print_message(&format!("Profile '{profile_name}' deleted.")),
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(crate::output::exit_codes::for_error(&e));
+        }
+    }
+}
+
 fn masked_or_unset(value: &Option<String>) -> String {
     match value {
         Some(v) => output::mask_credential(v),
@@ -235,5 +263,54 @@ client_secret = "work-csec"
             "abcdef…mnop"
         );
         assert_eq!(masked_or_unset(&None), "(not set)");
+    }
+
+    #[test]
+    fn delete_removes_profile_from_config() {
+        let _lock = ProcessEnvLock::acquire().unwrap();
+        let dir = TempDir::new().unwrap();
+        write_config(
+            dir.path(),
+            r#"
+[default]
+account_id = "def-acct"
+client_id = "def-cid"
+client_secret = "def-csec"
+
+[work]
+account_id = "work-acct"
+client_id = "work-cid"
+client_secret = "work-csec"
+"#,
+        )
+        .unwrap();
+
+        let _cfg_dir = set_config_dir_env(dir.path());
+        let path = dir.path().join("zoom-cli").join("config.toml");
+        config::delete_profile(&path, "work").unwrap();
+
+        let _env_acct = EnvVarGuard::unset("ZOOM_ACCOUNT_ID");
+        let _env_cid = EnvVarGuard::unset("ZOOM_CLIENT_ID");
+        let _env_csec = EnvVarGuard::unset("ZOOM_CLIENT_SECRET");
+        let _env_prof = EnvVarGuard::unset("ZOOM_PROFILE");
+
+        let summary = config::load_for_show(None);
+        assert_eq!(summary.profiles.len(), 1);
+        assert_eq!(summary.profiles[0].name, "default");
+    }
+
+    #[test]
+    fn delete_returns_not_found_for_missing_profile() {
+        let _lock = ProcessEnvLock::acquire().unwrap();
+        let dir = TempDir::new().unwrap();
+        write_config(
+            dir.path(),
+            "[default]\naccount_id=\"x\"\nclient_id=\"y\"\nclient_secret=\"z\"\n",
+        )
+        .unwrap();
+
+        let path = dir.path().join("zoom-cli").join("config.toml");
+        let err = config::delete_profile(&path, "nonexistent").unwrap_err();
+        assert!(matches!(err, crate::api::ApiError::NotFound(_)));
     }
 }
