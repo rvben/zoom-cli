@@ -137,6 +137,7 @@ pub async fn download(
             .map_err(|e| ApiError::Other(format!("Cannot create output directory: {e}")))?;
     }
 
+    let safe_topic = sanitize_path_component(&recording.topic);
     let mut downloaded = 0usize;
     for file in &files {
         let download_url = match &file.download_url {
@@ -153,8 +154,6 @@ pub async fn download(
             "TIMELINE" => "json",
             _ => "bin",
         };
-
-        let safe_topic = sanitize_path_component(&recording.topic);
         // Use recording_type (e.g. "shared_screen_with_speaker_view") as the
         // filename discriminator; multiple files of the same file_type (e.g.
         // two MP4 tracks) each have a distinct recording_type and won't
