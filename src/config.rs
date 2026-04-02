@@ -102,11 +102,7 @@ fn load_file_profile(profile: Option<&str>) -> Result<RawProfile, ApiError> {
         None => Ok(raw.default),
         Some(name) if name == "default" => Ok(raw.default),
         Some(name) => {
-            // Remove "default" from the available list since it's not in profiles map
-            let available: Vec<&str> = raw.profiles.keys()
-                .filter(|k| k.as_str() != "default")
-                .map(String::as_str)
-                .collect();
+            let available: Vec<&str> = raw.profiles.keys().map(String::as_str).collect();
             raw.profiles.get(&name).cloned().ok_or_else(|| {
                 ApiError::Other(format!(
                     "Profile '{name}' not found. Available: {}",
