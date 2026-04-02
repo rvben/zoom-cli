@@ -40,9 +40,9 @@ fn parse_zoom_error(body: &str) -> String {
         } else {
             format!("Missing required OAuth scope: {scope}")
         };
+        let link = crate::output::hyperlink("https://marketplace.zoom.us/user/build");
         return format!(
-            "{what}\nAdd this scope to your Zoom Server-to-Server OAuth app, \
-             then run `zoom init` to update credentials."
+            "{what}\nAdd this scope to your app at {link}, then run `zoom init` to update credentials."
         );
     }
 
