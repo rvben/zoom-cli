@@ -251,7 +251,8 @@ fn normalize(value: Option<String>) -> Option<String> {
     })
 }
 
-/// Write (or overwrite) a single profile in the config file, preserving other profiles.
+/// Write (or overwrite) a single profile in the config file, preserving other
+/// profiles and any comments or formatting in unmodified sections.
 ///
 /// Creates the config directory and file if they don't exist, then sets
 /// permissions to 0600 on unix.
@@ -268,36 +269,22 @@ pub fn write_profile(
         Err(e) => return Err(ApiError::Other(format!("Failed to read config: {e}"))),
     };
 
-    let mut table: toml::Table = if content.trim().is_empty() {
-        toml::Table::new()
-    } else {
-        toml::from_str(&content)
-            .map_err(|e| ApiError::Other(format!("Failed to parse config: {e}")))?
-    };
+    let mut doc: toml_edit::DocumentMut = content
+        .parse()
+        .map_err(|e| ApiError::Other(format!("Failed to parse config: {e}")))?;
 
-    let mut profile = toml::Table::new();
-    profile.insert(
-        "account_id".into(),
-        toml::Value::String(account_id.to_owned()),
-    );
-    profile.insert(
-        "client_id".into(),
-        toml::Value::String(client_id.to_owned()),
-    );
-    profile.insert(
-        "client_secret".into(),
-        toml::Value::String(client_secret.to_owned()),
-    );
-    table.insert(profile_name.to_owned(), toml::Value::Table(profile));
+    let mut profile = toml_edit::Table::new();
+    profile["account_id"] = toml_edit::value(account_id);
+    profile["client_id"] = toml_edit::value(client_id);
+    profile["client_secret"] = toml_edit::value(client_secret);
+    doc[profile_name] = toml_edit::Item::Table(profile);
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| ApiError::Other(format!("Cannot create config directory: {e}")))?;
     }
 
-    let serialized = toml::to_string_pretty(&table)
-        .map_err(|e| ApiError::Other(format!("Failed to serialize config: {e}")))?;
-    write_config_file(path, &serialized)?;
+    write_config_file(path, &doc.to_string())?;
     Ok(())
 }
 
@@ -324,7 +311,8 @@ fn write_config_file(path: &Path, content: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Remove a named profile from the config file.
+/// Remove a named profile from the config file, preserving comments and
+/// formatting in the remaining sections.
 ///
 /// Returns `Ok(())` if removed, `Err(ApiError::NotFound)` if the profile
 /// doesn't exist, and `Err(ApiError::Other(...))` for IO/parse failures.
@@ -340,23 +328,19 @@ pub fn delete_profile(path: &Path, profile_name: &str) -> Result<(), ApiError> {
         Err(e) => return Err(ApiError::Other(format!("Failed to read config: {e}"))),
     };
 
-    let mut table: toml::Table =
-        toml::from_str(&content).map_err(|e| ApiError::Other(format!("Invalid config: {e}")))?;
+    let mut doc: toml_edit::DocumentMut = content
+        .parse()
+        .map_err(|e| ApiError::Other(format!("Invalid config: {e}")))?;
 
     // Both "default" and named profiles are stored as top-level TOML keys.
-    let existed = table.remove(profile_name).is_some();
-
-    if !existed {
+    if doc.remove(profile_name).is_none() {
         return Err(ApiError::NotFound(format!(
             "Profile '{}' not found.",
             profile_name
         )));
     }
 
-    let new_content = toml::to_string_pretty(&table)
-        .map_err(|e| ApiError::Other(format!("Failed to serialize config: {e}")))?;
-
-    write_config_file(path, &new_content)?;
+    write_config_file(path, &doc.to_string())?;
     Ok(())
 }
 
@@ -582,5 +566,48 @@ client_secret = "w-csec"
 
         let err = Config::load(None).unwrap_err();
         assert!(matches!(err, ApiError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn write_profile_preserves_comments_in_other_sections() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        // Write a file with a comment above an existing profile.
+        std::fs::write(
+            &path,
+            "# This comment must survive\n[work]\naccount_id = \"w\"\nclient_id = \"w\"\nclient_secret = \"w\"\n",
+        )
+        .unwrap();
+
+        write_profile(&path, "default", "acct", "cid", "csec").unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("# This comment must survive"),
+            "write_profile must not destroy comments in unrelated sections"
+        );
+        assert!(after.contains("[default]"), "new profile must be present");
+        assert!(after.contains("[work]"), "existing profile must be preserved");
+    }
+
+    #[test]
+    fn delete_profile_preserves_comments_in_remaining_sections() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "# Keep this\n[default]\naccount_id = \"d\"\nclient_id = \"d\"\nclient_secret = \"d\"\n\n[work]\naccount_id = \"w\"\nclient_id = \"w\"\nclient_secret = \"w\"\n",
+        )
+        .unwrap();
+
+        delete_profile(&path, "work").unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("# Keep this"),
+            "delete_profile must not destroy comments in remaining sections"
+        );
+        assert!(after.contains("[default]"), "default profile must remain");
+        assert!(!after.contains("[work]"), "deleted profile must be gone");
     }
 }

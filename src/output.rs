@@ -1,4 +1,6 @@
 use std::io::IsTerminal;
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
 
 use crate::api::ApiError;
 
@@ -15,20 +17,33 @@ pub fn hyperlink(url: &str) -> String {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct OutputConfig {
     pub json: bool,
     pub quiet: bool,
+    /// When set in tests, `print_data` appends to this buffer instead of stdout.
+    #[cfg(test)]
+    pub captured: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 impl OutputConfig {
     pub fn new(json_flag: bool, quiet: bool) -> Self {
         let json = json_flag || !std::io::stdout().is_terminal();
-        Self { json, quiet }
+        Self {
+            json,
+            quiet,
+            #[cfg(test)]
+            captured: None,
+        }
     }
 
     /// Print data to stdout (tables, JSON, or single values). Always shown.
     pub fn print_data(&self, data: &str) {
+        #[cfg(test)]
+        if let Some(ref buf) = self.captured {
+            buf.lock().unwrap().push(data.to_owned());
+            return;
+        }
         println!("{data}");
     }
 
@@ -52,6 +67,29 @@ impl OutputConfig {
         } else {
             println!("{human_message}");
         }
+    }
+}
+
+#[cfg(test)]
+impl OutputConfig {
+    /// Non-capturing test config (JSON mode, quiet).
+    pub fn for_test() -> Self {
+        Self {
+            json: true,
+            quiet: true,
+            captured: None,
+        }
+    }
+
+    /// Human-mode config that captures all `print_data` calls to the returned buffer.
+    pub fn capturing() -> (Self, Arc<Mutex<Vec<String>>>) {
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let out = Self {
+            json: false,
+            quiet: true,
+            captured: Some(Arc::clone(&buf)),
+        };
+        (out, buf)
     }
 }
 

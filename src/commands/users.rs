@@ -123,10 +123,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_out_json() -> OutputConfig {
-        OutputConfig {
-            json: true,
-            quiet: true,
-        }
+        OutputConfig::for_test()
     }
 
     #[tokio::test]

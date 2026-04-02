@@ -98,10 +98,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_out() -> OutputConfig {
-        OutputConfig {
-            json: true,
-            quiet: true,
-        }
+        OutputConfig::for_test()
     }
 
     #[tokio::test]
@@ -126,7 +123,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reports_meetings_returns_rows() {
+    async fn reports_meetings_renders_topic_and_duration() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/v2/report/users/me/meetings"))
@@ -150,13 +147,18 @@ mod tests {
             .await;
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        meetings(&mut client, &test_out(), "me", "2026-04-01", None)
+        let (out, buf) = OutputConfig::capturing();
+        meetings(&mut client, &out, "me", "2026-04-01", None)
             .await
             .unwrap();
+        let captured = buf.lock().unwrap().join("\n");
+        assert!(captured.contains("Weekly Standup"), "table must include topic");
+        assert!(captured.contains("30 min"), "table must include duration");
+        assert!(captured.contains("8"), "table must include participant count");
     }
 
     #[tokio::test]
-    async fn reports_participants_returns_rows() {
+    async fn reports_participants_renders_name_email_and_duration() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/v2/report/meetings/123456789/participants"))
@@ -176,8 +178,14 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        participants(&mut client, &test_out(), "123456789")
-            .await
-            .unwrap();
+        let (out, buf) = OutputConfig::capturing();
+        participants(&mut client, &out, "123456789").await.unwrap();
+        let captured = buf.lock().unwrap().join("\n");
+        assert!(captured.contains("Alice"), "table must include participant name");
+        assert!(
+            captured.contains("alice@example.com"),
+            "table must include email"
+        );
+        assert!(captured.contains("30 min"), "1800s must render as 30 min");
     }
 }

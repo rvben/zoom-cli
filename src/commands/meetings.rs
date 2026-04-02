@@ -265,10 +265,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_out() -> OutputConfig {
-        OutputConfig {
-            json: true,
-            quiet: true,
-        }
+        OutputConfig::for_test()
     }
 
     #[test]

@@ -2235,5 +2235,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "toml_edit",
  "wiremock",
 ]
