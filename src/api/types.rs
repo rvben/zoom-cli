@@ -284,6 +284,37 @@ pub struct UserMeetingReportList {
     pub page_size: Option<u32>,
 }
 
+// ── Meeting participant report ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MeetingParticipantReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub join_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leave_time: Option<String>,
+    /// Participation duration in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MeetingParticipantReportList {
+    pub participants: Vec<MeetingParticipantReport>,
+    #[serde(skip_serializing_if = "is_none_or_empty")]
+    pub next_page_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_records: Option<u64>,
+    #[serde(skip_serializing)]
+    pub page_size: Option<u32>,
+}
+
 // ── Webinar ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -374,6 +405,16 @@ impl Paginated for UserMeetingReportList {
     fn append_page(&mut self, next: Self) {
         self.meetings.extend(next.meetings);
         self.next_page_token = next.next_page_token.filter(|t| !t.is_empty());
+    }
+}
+
+impl Paginated for MeetingParticipantReportList {
+    fn next_page_token(&self) -> Option<&str> {
+        self.next_page_token.as_deref().filter(|s| !s.is_empty())
+    }
+    fn append_page(&mut self, next: Self) {
+        self.participants.extend(next.participants);
+        self.next_page_token = next.next_page_token;
     }
 }
 

@@ -532,6 +532,18 @@ impl ZoomClient {
             .await
     }
 
+    pub async fn list_meeting_participant_reports(
+        &mut self,
+        meeting_id: &str,
+    ) -> Result<MeetingParticipantReportList, ApiError> {
+        let encoded_id = encode_meeting_id(meeting_id);
+        self.get_all_pages(
+            &format!("/report/meetings/{encoded_id}/participants"),
+            &[("page_size", "300")],
+        )
+        .await
+    }
+
     // ── Webinars ──────────────────────────────────────────────────────────────
 
     pub async fn list_webinars(&mut self, user_id: &str) -> Result<WebinarList, ApiError> {

@@ -48,6 +48,48 @@ pub async fn meetings(
     Ok(())
 }
 
+pub async fn participants(
+    client: &mut ZoomClient,
+    out: &OutputConfig,
+    meeting_id: &str,
+) -> Result<(), ApiError> {
+    let result = client.list_meeting_participant_reports(meeting_id).await?;
+
+    if out.json {
+        out.print_data(&serde_json::to_string_pretty(&result).expect("serialize"));
+    } else {
+        if result.participants.is_empty() {
+            out.print_message("No participants found.");
+            return Ok(());
+        }
+        let rows: Vec<Vec<String>> = result
+            .participants
+            .iter()
+            .map(|p| {
+                vec![
+                    p.name.clone(),
+                    p.user_email.clone().unwrap_or_default(),
+                    p.join_time
+                        .as_deref()
+                        .map(output::format_timestamp)
+                        .unwrap_or_else(|| "-".into()),
+                    p.duration
+                        .map(|d| format!("{} min", d / 60))
+                        .unwrap_or_else(|| "-".into()),
+                ]
+            })
+            .collect();
+        out.print_data(&output::table(
+            &["NAME", "EMAIL", "JOIN TIME", "DURATION"],
+            &rows,
+        ));
+        if let Some(total) = result.total_records {
+            out.print_message(&format!("{total} participant(s) total"));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,6 +151,32 @@ mod tests {
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         meetings(&mut client, &test_out(), "me", "2026-04-01", None)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn reports_participants_returns_rows() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v2/report/meetings/123456789/participants"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "participants": [
+                    {
+                        "name": "Alice",
+                        "user_email": "alice@example.com",
+                        "join_time": "2026-04-01T09:00:00Z",
+                        "duration": 1800
+                    }
+                ],
+                "total_records": 1
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        participants(&mut client, &test_out(), "123456789")
             .await
             .unwrap();
     }

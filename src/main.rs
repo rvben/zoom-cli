@@ -238,6 +238,11 @@ enum ReportsCommand {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Participant report for a past meeting
+    Participants {
+        /// Meeting ID or UUID
+        meeting_id: String,
+    },
 }
 
 #[tokio::main]
@@ -371,6 +376,9 @@ async fn main() {
         Command::Reports(cmd) => match cmd {
             ReportsCommand::Meetings { user, from, to } => {
                 commands::reports::meetings(&mut client, &out, &user, &from, to.as_deref()).await
+            }
+            ReportsCommand::Participants { meeting_id } => {
+                commands::reports::participants(&mut client, &out, &meeting_id).await
             }
         },
         Command::Webinars(cmd) => match cmd {
