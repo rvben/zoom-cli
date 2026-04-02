@@ -1,0 +1,36 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "zoom-cli"
+dynamic = ["version"]
+description = "Agent-friendly CLI for the Zoom API"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Ruben J. Jongejan", email = "ruben.jongejan@gmail.com" }
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Communications :: Conferencing",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/rvben/zoom-cli"
+Repository = "https://github.com/rvben/zoom-cli.git"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "Cargo.toml"
+python-packages = ["zoom_cli"]
+strip = true
