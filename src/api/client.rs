@@ -2,6 +2,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use std::io::IsTerminal;
 
 use super::ApiError;
 use super::types::{self, *};
@@ -175,15 +176,24 @@ impl ZoomClient {
         T: DeserializeOwned + types::Paginated,
     {
         let mut result: T = self.get_with_query(path, base_params).await?;
+        let mut page_num: u32 = 1;
         loop {
             let token = match result.next_page_token() {
                 Some(t) if !t.is_empty() => t.to_owned(),
                 _ => break,
             };
+            page_num += 1;
+            if std::io::stderr().is_terminal() {
+                eprint!("\r  Fetching page {page_num}...");
+                let _ = std::io::Write::flush(&mut std::io::stderr());
+            }
             let mut params = base_params.to_vec();
             params.push(("next_page_token", token.as_str()));
             let next: T = self.get_with_query(path, &params).await?;
             result.append_page(next);
+        }
+        if page_num > 1 && std::io::stderr().is_terminal() {
+            eprint!("\r                    \r");
         }
         Ok(result)
     }
