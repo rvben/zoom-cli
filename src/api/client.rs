@@ -352,7 +352,7 @@ impl ZoomClient {
         &mut self,
         meeting_id: &str,
     ) -> Result<ParticipantList, ApiError> {
-        let encoded_id = meeting_id.replace('/', "%2F");
+        let encoded_id = encode_meeting_id(meeting_id);
         self.get_all_pages(
             &format!("/past_meetings/{encoded_id}/participants"),
             &[("page_size", "300")],
@@ -388,7 +388,7 @@ impl ZoomClient {
     /// `trash`: when `true`, moves files to the trash (recoverable for 30 days);
     /// when `false`, permanently deletes them immediately.
     pub async fn delete_recording(&mut self, meeting_id: &str, trash: bool) -> Result<(), ApiError> {
-        let encoded_id = meeting_id.replace('/', "%2F");
+        let encoded_id = encode_meeting_id(meeting_id);
         let action = if trash { "trash" } else { "delete" };
         self.delete_with_query(
             &format!("/meetings/{encoded_id}/recordings"),
@@ -411,14 +411,17 @@ impl ZoomClient {
     }
 
     pub async fn get_recording(&mut self, meeting_id: &str) -> Result<CloudRecording, ApiError> {
-        // Zoom meeting UUIDs can contain '/' (base64 chars); encode it so the
-        // character is not interpreted as a path separator.
-        let encoded_id = meeting_id.replace('/', "%2F");
+        let encoded_id = encode_meeting_id(meeting_id);
         self.get(&format!("/meetings/{encoded_id}/recordings"))
             .await
     }
 
-    /// Download a recording file to disk. Handles Zoom's auth-required downloads.
+    /// Download a recording file to disk.
+    ///
+    /// Uses `send_with_retry` so expired tokens are refreshed and rate-limit
+    /// retries apply, matching all other API calls. Writes to a `.download`
+    /// temp file and renames atomically on success so a failed or interrupted
+    /// download never leaves a partial file at the destination path.
     pub async fn download_recording_file(
         &mut self,
         download_url: &str,
@@ -427,12 +430,9 @@ impl ZoomClient {
         use futures_util::StreamExt;
         use tokio::io::AsyncWriteExt;
 
-        let token = self.ensure_token().await?.to_owned();
+        let url = download_url.to_owned();
         let resp = self
-            .http
-            .get(download_url)
-            .bearer_auth(&token)
-            .send()
+            .send_with_retry(|http, token| http.get(&url).bearer_auth(token))
             .await?;
 
         let status = resp.status();
@@ -449,24 +449,40 @@ impl ZoomClient {
             });
         }
 
-        let mut file = tokio::fs::File::create(dest_path).await.map_err(|e| {
-            ApiError::Other(format!("Cannot create file {}: {e}", dest_path.display()))
-        })?;
-
-        let mut bytes_written: u64 = 0;
-        let mut stream = resp.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            file.write_all(&chunk)
+        // Stream into a temp file; rename to the final path only on success.
+        let tmp_path = dest_path.with_extension("download");
+        let write_result: Result<u64, ApiError> = async {
+            let mut file = tokio::fs::File::create(&tmp_path).await.map_err(|e| {
+                ApiError::Other(format!("Cannot create file {}: {e}", tmp_path.display()))
+            })?;
+            let mut bytes_written: u64 = 0;
+            let mut stream = resp.bytes_stream();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk?;
+                file.write_all(&chunk)
+                    .await
+                    .map_err(|e| ApiError::Other(format!("Write error: {e}")))?;
+                bytes_written += chunk.len() as u64;
+            }
+            file.flush()
                 .await
-                .map_err(|e| ApiError::Other(format!("Write error: {e}")))?;
-            bytes_written += chunk.len() as u64;
+                .map_err(|e| ApiError::Other(format!("Flush error: {e}")))?;
+            Ok(bytes_written)
         }
-        file.flush()
-            .await
-            .map_err(|e| ApiError::Other(format!("Flush error: {e}")))?;
+        .await;
 
-        Ok(bytes_written)
+        match write_result {
+            Ok(bytes) => {
+                tokio::fs::rename(&tmp_path, dest_path).await.map_err(|e| {
+                    ApiError::Other(format!("Cannot finalize download: {e}"))
+                })?;
+                Ok(bytes)
+            }
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                Err(e)
+            }
+        }
     }
 
     // ── Reports ───────────────────────────────────────────────────────────────
@@ -496,6 +512,21 @@ impl ZoomClient {
 
     pub async fn get_webinar(&mut self, webinar_id: u64) -> Result<Webinar, ApiError> {
         self.get(&format!("/webinars/{webinar_id}")).await
+    }
+}
+
+/// Percent-encode a Zoom meeting ID for use in URL path segments.
+///
+/// Zoom meeting UUIDs can contain `/` (base64 chars). When a UUID begins with
+/// `/` or contains `//`, the Zoom API gateway decodes the path before routing,
+/// so a single-encoded slash (`%2F`) would be decoded back to `/` and corrupt
+/// the URL. Such UUIDs must be **double-encoded**: `/` → `%252F`, so that after
+/// one decode pass the API handler sees `%2F` and correctly treats it as data.
+fn encode_meeting_id(id: &str) -> String {
+    if id.starts_with('/') || id.contains("//") {
+        id.replace('/', "%252F")
+    } else {
+        id.replace('/', "%2F")
     }
 }
 
@@ -917,6 +948,47 @@ mod tests {
         assert_eq!(list.meetings[0].topic, "Page 1 Meeting");
         assert_eq!(list.meetings[1].topic, "Page 2 Meeting");
         assert!(list.next_page_token.is_none(), "exhausted token must be absent");
+    }
+
+    #[test]
+    fn encode_meeting_id_single_encodes_plain_uuids() {
+        assert_eq!(encode_meeting_id("abc123"), "abc123");
+        assert_eq!(encode_meeting_id("abc/def"), "abc%2Fdef");
+    }
+
+    #[test]
+    fn encode_meeting_id_double_encodes_leading_slash() {
+        // UUID starting with '/' must be double-encoded so the API gateway
+        // does not consume the slash during path decoding.
+        assert_eq!(encode_meeting_id("/abc"), "%252Fabc");
+        assert_eq!(encode_meeting_id("/abc/def"), "%252Fabc%252Fdef");
+    }
+
+    #[test]
+    fn encode_meeting_id_double_encodes_double_slash() {
+        assert_eq!(encode_meeting_id("abc//def"), "abc%252F%252Fdef");
+        assert_eq!(encode_meeting_id("4444AAAiAAAAAiAA//AA=="), "4444AAAiAAAAAiAA%252F%252FAA==");
+    }
+
+    #[tokio::test]
+    async fn get_recording_double_encodes_uuid_with_double_slash() {
+        let server = MockServer::start().await;
+        // The path must contain %252F%252F (double-encoded), not %2F%2F.
+        Mock::given(method("GET"))
+            .and(path("/v2/meetings/abc%252F%252Fdef/recordings"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 123,
+                "topic": "Double-slash UUID meeting",
+                "start_time": "2026-04-01T10:00:00Z",
+                "duration": 30,
+                "recording_files": []
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        let rec = client.get_recording("abc//def").await.unwrap();
+        assert_eq!(rec.topic, "Double-slash UUID meeting");
     }
 
     #[tokio::test]

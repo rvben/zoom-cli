@@ -9,7 +9,7 @@ pub async fn list(
     to: Option<&str>,
 ) -> Result<(), ApiError> {
     let result = client.list_recordings(user, from, to).await?;
-    let recordings = result.recordings.clone().unwrap_or_default();
+    let recordings = result.recordings.as_deref().unwrap_or_default();
 
     if out.json {
         out.print_data(&serde_json::to_string_pretty(&result).expect("serialize"));
@@ -150,13 +150,15 @@ pub async fn download(
         // Use recording_type (e.g. "shared_screen_with_speaker_view") as the
         // filename discriminator; multiple files of the same file_type (e.g.
         // two MP4 tracks) each have a distinct recording_type and won't
-        // overwrite each other.
-        let discriminator = file
+        // overwrite each other. Sanitize to alphanumeric plus safe punctuation
+        // so API-sourced values cannot introduce path traversal components.
+        let discriminator: String = file
             .recording_type
             .as_deref()
             .unwrap_or(file_type)
-            .to_lowercase()
-            .replace(' ', "_");
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() } else { '_' })
+            .collect();
         let filename = format!(
             "{}_{}_{}.{}",
             safe_topic,
