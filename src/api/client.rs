@@ -9,6 +9,10 @@ use super::types::{self, *};
 const ZOOM_API_BASE: &str = "https://api.zoom.us/v2";
 const ZOOM_OAUTH_BASE: &str = "https://zoom.us";
 
+/// Maximum number of attempts before giving up on a rate-limited request.
+/// 4 attempts = initial + 3 retries.
+const MAX_RETRY_ATTEMPTS: u32 = 4;
+
 pub struct ZoomClient {
     http: reqwest::Client,
     base_url: String,
@@ -94,10 +98,55 @@ impl ZoomClient {
         Ok(token_resp.access_token)
     }
 
+    /// Send a request, retrying on HTTP 429 with exponential backoff.
+    ///
+    /// `build` is called once per attempt and receives the HTTP client and bearer
+    /// token. It must produce a `RequestBuilder` that is ready to send. The
+    /// closure is `Fn` so it can be called multiple times without moving values.
+    ///
+    /// The `Retry-After` response header is honoured when present; otherwise the
+    /// delay starts at 1 s and doubles up to 60 s.
+    async fn send_with_retry(
+        &mut self,
+        build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, ApiError> {
+        let mut delay = std::time::Duration::from_secs(1);
+        for attempt in 0..MAX_RETRY_ATTEMPTS {
+            // Ensure we have a valid token before each attempt (cached after first call).
+            let token = self.ensure_token().await?.to_owned();
+            let resp = build(&self.http, &token).send().await?;
+
+            let is_last_attempt = attempt + 1 >= MAX_RETRY_ATTEMPTS;
+            if resp.status().as_u16() != 429 || is_last_attempt {
+                return Ok(resp);
+            }
+
+            // 429 and we have retries remaining: wait before the next attempt.
+            let wait = retry_after_duration(&resp).unwrap_or(delay);
+            tokio::time::sleep(wait).await;
+            delay = (delay * 2).min(std::time::Duration::from_secs(60));
+        }
+        // Unreachable: the loop always returns via the early-return above.
+        unreachable!()
+    }
+
     async fn get<T: DeserializeOwned>(&mut self, path: &str) -> Result<T, ApiError> {
         let url = format!("{}{}", self.base_url, path);
-        let token = self.ensure_token().await?.to_owned();
-        let resp = self.http.get(&url).bearer_auth(&token).send().await?;
+        let resp = self
+            .send_with_retry(|http, token| http.get(&url).bearer_auth(token))
+            .await?;
+        self.handle_response(resp).await
+    }
+
+    async fn get_with_query<T: DeserializeOwned>(
+        &mut self,
+        path: &str,
+        params: &[(&str, &str)],
+    ) -> Result<T, ApiError> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .send_with_retry(|http, token| http.get(&url).bearer_auth(token).query(params))
+            .await?;
         self.handle_response(resp).await
     }
 
@@ -120,70 +169,51 @@ impl ZoomClient {
         Ok(result)
     }
 
-    async fn get_with_query<T: DeserializeOwned>(
-        &mut self,
-        path: &str,
-        params: &[(&str, &str)],
-    ) -> Result<T, ApiError> {
-        let url = format!("{}{}", self.base_url, path);
-        let token = self.ensure_token().await?.to_owned();
-        let resp = self
-            .http
-            .get(&url)
-            .bearer_auth(&token)
-            .query(params)
-            .send()
-            .await?;
-        self.handle_response(resp).await
-    }
-
     async fn post<T: DeserializeOwned, B: Serialize>(
         &mut self,
         path: &str,
         body: &B,
     ) -> Result<T, ApiError> {
         let url = format!("{}{}", self.base_url, path);
-        let token = self.ensure_token().await?.to_owned();
         let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(&token)
-            .json(body)
-            .send()
+            .send_with_retry(|http, token| http.post(&url).bearer_auth(token).json(body))
             .await?;
         self.handle_response(resp).await
     }
 
     async fn patch<B: Serialize>(&mut self, path: &str, body: &B) -> Result<(), ApiError> {
         let url = format!("{}{}", self.base_url, path);
-        let token = self.ensure_token().await?.to_owned();
         let resp = self
-            .http
-            .patch(&url)
-            .bearer_auth(&token)
-            .json(body)
-            .send()
+            .send_with_retry(|http, token| http.patch(&url).bearer_auth(token).json(body))
             .await?;
         self.handle_empty_response(resp).await
     }
 
     async fn put<B: Serialize>(&mut self, path: &str, body: &B) -> Result<(), ApiError> {
         let url = format!("{}{}", self.base_url, path);
-        let token = self.ensure_token().await?.to_owned();
         let resp = self
-            .http
-            .put(&url)
-            .bearer_auth(&token)
-            .json(body)
-            .send()
+            .send_with_retry(|http, token| http.put(&url).bearer_auth(token).json(body))
             .await?;
         self.handle_empty_response(resp).await
     }
 
     async fn delete(&mut self, path: &str) -> Result<(), ApiError> {
         let url = format!("{}{}", self.base_url, path);
-        let token = self.ensure_token().await?.to_owned();
-        let resp = self.http.delete(&url).bearer_auth(&token).send().await?;
+        let resp = self
+            .send_with_retry(|http, token| http.delete(&url).bearer_auth(token))
+            .await?;
+        self.handle_empty_response(resp).await
+    }
+
+    async fn delete_with_query(
+        &mut self,
+        path: &str,
+        params: &[(&str, &str)],
+    ) -> Result<(), ApiError> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .send_with_retry(|http, token| http.delete(&url).bearer_auth(token).query(params))
+            .await?;
         self.handle_empty_response(resp).await
     }
 
@@ -301,7 +331,7 @@ impl ZoomClient {
         self.get(&format!("/users/{user_id}")).await
     }
 
-    // ── Participants ─────────────────────────────────────────────────────────────
+    // ── Participants ─────────────────────────────────────────────────────────
 
     pub async fn list_past_meeting_participants(
         &mut self,
@@ -336,6 +366,20 @@ impl ZoomClient {
             params.push(("to", to_owned.as_str()));
         }
         self.get_all_pages(&path, &params).await
+    }
+
+    /// Delete all cloud recording files for a meeting.
+    ///
+    /// `trash`: when `true`, moves files to the trash (recoverable for 30 days);
+    /// when `false`, permanently deletes them immediately.
+    pub async fn delete_recording(&mut self, meeting_id: &str, trash: bool) -> Result<(), ApiError> {
+        let encoded_id = meeting_id.replace('/', "%2F");
+        let action = if trash { "trash" } else { "delete" };
+        self.delete_with_query(
+            &format!("/meetings/{encoded_id}/recordings"),
+            &[("action", action)],
+        )
+        .await
     }
 
     /// Control recording state for a live meeting (start/stop/pause/resume).
@@ -427,6 +471,32 @@ impl ZoomClient {
         self.get_all_pages(&format!("/report/users/{user_id}/meetings"), &params)
             .await
     }
+
+    // ── Webinars ──────────────────────────────────────────────────────────────
+
+    pub async fn list_webinars(&mut self, user_id: &str) -> Result<WebinarList, ApiError> {
+        let path = format!("/users/{user_id}/webinars");
+        self.get_all_pages(&path, &[("page_size", "300")]).await
+    }
+
+    pub async fn get_webinar(&mut self, webinar_id: u64) -> Result<Webinar, ApiError> {
+        self.get(&format!("/webinars/{webinar_id}")).await
+    }
+}
+
+/// Parse the `Retry-After` header as a delay duration.
+///
+/// Zoom uses integer seconds. Caps at 60 s to avoid extremely long waits from
+/// misconfigured or adversarial responses.
+fn retry_after_duration(resp: &reqwest::Response) -> Option<std::time::Duration> {
+    let secs: u64 = resp
+        .headers()
+        .get("retry-after")?
+        .to_str()
+        .ok()?
+        .parse()
+        .ok()?;
+    Some(std::time::Duration::from_secs(secs.min(60)))
 }
 
 #[cfg(test)]
@@ -567,18 +637,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rate_limit_response_returns_rate_limit_error() {
+    async fn rate_limit_response_is_retried_and_succeeds() {
         let server = MockServer::start().await;
 
+        // First request: 429 with Retry-After: 0 (instant retry in tests).
         Mock::given(method("GET"))
             .and(path("/v2/users/me/meetings"))
-            .respond_with(ResponseTemplate::new(429))
+            .respond_with(
+                ResponseTemplate::new(429).insert_header("retry-after", "0"),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Second request: 200.
+        Mock::given(method("GET"))
+            .and(path("/v2/users/me/meetings"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meetings": [{"id": 1, "topic": "After retry"}],
+                "total_records": 1
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        let list = client.list_meetings("me", None).await.unwrap();
+        assert_eq!(list.meetings.len(), 1, "result from the retry attempt");
+        assert_eq!(list.meetings[0].topic, "After retry");
+    }
+
+    #[tokio::test]
+    async fn rate_limit_exhausted_returns_rate_limit_error() {
+        let server = MockServer::start().await;
+
+        // All requests return 429 — retries exhausted.
+        Mock::given(method("GET"))
+            .and(path("/v2/users/me/meetings"))
+            .respond_with(
+                ResponseTemplate::new(429).insert_header("retry-after", "0"),
+            )
             .mount(&server)
             .await;
 
         let mut client = mock_client(&server).await;
         let err = client.list_meetings("me", None).await.unwrap_err();
         assert!(matches!(err, ApiError::RateLimit));
+    }
+
+    #[tokio::test]
+    async fn retry_after_header_is_parsed() {
+        let server = MockServer::start().await;
+
+        // Return 429 with a Retry-After header once, then 200.
+        Mock::given(method("GET"))
+            .and(path("/v2/users"))
+            .respond_with(
+                ResponseTemplate::new(429).insert_header("retry-after", "0"),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/users"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "users": [], "total_records": 0
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        // Should succeed after the retry.
+        client.list_users(None).await.unwrap();
     }
 
     #[tokio::test]
@@ -762,5 +892,73 @@ mod tests {
         assert_eq!(list.participants.len(), 2);
         assert_eq!(list.participants[0].name, Some("Alice".into()));
         assert_eq!(list.participants[1].name, Some("Bob".into()));
+    }
+
+    #[tokio::test]
+    async fn delete_recording_sends_delete_with_action_trash() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/v2/meetings/abc123/recordings"))
+            .and(query_param("action", "trash"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        client.delete_recording("abc123", true).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_recording_sends_delete_with_action_delete() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/v2/meetings/abc123/recordings"))
+            .and(query_param("action", "delete"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        client.delete_recording("abc123", false).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_webinars_returns_list() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v2/users/me/webinars"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "webinars": [
+                    {
+                        "id": 12345678,
+                        "topic": "Product Launch",
+                        "start_time": "2026-05-01T14:00:00Z",
+                        "duration": 60,
+                        "type": 5
+                    }
+                ],
+                "total_records": 1
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        let list = client.list_webinars("me").await.unwrap();
+        assert_eq!(list.webinars.len(), 1);
+        assert_eq!(list.webinars[0].topic, "Product Launch");
+    }
+
+    #[tokio::test]
+    async fn get_webinar_returns_404_as_not_found() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v2/webinars/99999999"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Webinar not found"))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        let err = client.get_webinar(99999999).await.unwrap_err();
+        assert!(matches!(err, ApiError::NotFound(_)));
     }
 }

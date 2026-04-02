@@ -46,6 +46,10 @@ enum Command {
     #[command(subcommand, arg_required_else_help = true)]
     Reports(ReportsCommand),
 
+    /// Manage webinars
+    #[command(subcommand, arg_required_else_help = true)]
+    Webinars(WebinarsCommand),
+
     /// Set up credentials interactively (or print JSON schema for agents)
     Init {
         /// Profile name to create or update (default: "default")
@@ -132,6 +136,14 @@ enum RecordingsCommand {
         #[arg(long, default_value = ".")]
         out: String,
     },
+    /// Delete all cloud recordings for a meeting
+    Delete {
+        /// Meeting ID or UUID
+        meeting_id: String,
+        /// Move to trash instead of permanently deleting (default behaviour)
+        #[arg(long, default_value_t = true)]
+        trash: bool,
+    },
     /// Start cloud recording for a live meeting
     Start {
         /// Numeric meeting ID of the live meeting
@@ -165,6 +177,17 @@ enum UsersCommand {
     Get { id_or_email: String },
     /// Get the current user
     Me,
+}
+
+#[derive(Subcommand)]
+enum WebinarsCommand {
+    /// List webinars for a user
+    List {
+        #[arg(long, default_value = "me")]
+        user: String,
+    },
+    /// Get a webinar by ID
+    Get { id: u64 },
 }
 
 #[derive(Subcommand)]
@@ -270,6 +293,9 @@ async fn main() {
             RecordingsCommand::Resume { meeting_id } => {
                 commands::recordings::control(&mut client, &out, meeting_id, "resume").await
             }
+            RecordingsCommand::Delete { meeting_id, trash } => {
+                commands::recordings::delete(&mut client, &out, &meeting_id, trash).await
+            }
         },
         Command::Users(cmd) => match cmd {
             UsersCommand::List { status } => {
@@ -284,6 +310,12 @@ async fn main() {
             ReportsCommand::Meetings { user, from, to } => {
                 commands::reports::meetings(&mut client, &out, &user, &from, to.as_deref()).await
             }
+        },
+        Command::Webinars(cmd) => match cmd {
+            WebinarsCommand::List { user } => {
+                commands::webinars::list(&mut client, &out, &user).await
+            }
+            WebinarsCommand::Get { id } => commands::webinars::get(&mut client, &out, id).await,
         },
         Command::Init { .. } | Command::Schema { .. } | Command::Completions { .. } => {
             unreachable!()

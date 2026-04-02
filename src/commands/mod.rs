@@ -3,6 +3,7 @@ pub mod meetings;
 pub mod recordings;
 pub mod reports;
 pub mod users;
+pub mod webinars;
 
 use crate::output::OutputConfig;
 
@@ -84,6 +85,13 @@ pub fn schema(resource: &str, out: &OutputConfig) {
                     "description": "Download recording files to disk",
                     "args": { "meeting_id": "Meeting ID or UUID" },
                     "flags": { "--out": "Output directory (default: .)" }
+                },
+                "delete": {
+                    "description": "Delete all cloud recordings for a meeting",
+                    "args": { "meeting_id": "Meeting ID or UUID" },
+                    "flags": {
+                        "--trash": "Move to trash instead of permanently deleting (default: true)"
+                    }
                 }
             },
             "fields": {
@@ -148,8 +156,31 @@ pub fn schema(resource: &str, out: &OutputConfig) {
                 "total_minutes": "u32 — total participant-minutes"
             }
         }),
+        "webinars" => serde_json::json!({
+            "resource": "webinars",
+            "commands": {
+                "list": {
+                    "description": "List webinars for a user",
+                    "flags": { "--user": "User ID or 'me' (default: me)" }
+                },
+                "get": {
+                    "description": "Get a webinar by ID",
+                    "args": { "id": "Webinar ID (u64)" }
+                }
+            },
+            "fields": {
+                "id": "u64 — webinar ID",
+                "topic": "string",
+                "start_time": "string — ISO 8601",
+                "duration": "u32 — minutes",
+                "join_url": "string",
+                "status": "string — waiting|started|finished",
+                "agenda": "string",
+                "webinar_type": "u8 — 5=webinar 6=recurring no fixed time 9=recurring fixed time"
+            }
+        }),
         _ => {
-            eprintln!("Unknown resource '{resource}'. Available: meetings, recordings, reports, users");
+            eprintln!("Unknown resource '{resource}'. Available: meetings, recordings, reports, users, webinars");
             std::process::exit(1);
         }
     };

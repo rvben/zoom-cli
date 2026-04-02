@@ -2,6 +2,29 @@ use crate::api::types::{CreateMeetingRequest, UpdateMeetingRequest};
 use crate::api::{ApiError, ZoomClient};
 use crate::output::{self, OutputConfig};
 
+/// Returns `true` when `s` looks like a datetime without timezone information.
+///
+/// A naive datetime has a `T` separator but no `Z`, `+`, or `-` after it
+/// (negative offsets like `-05:00` always appear after the time portion, not
+/// in the date part). Date-only strings (e.g. `"2026-04-01"`) return `false`
+/// because they have no time component to carry timezone ambiguity.
+fn is_naive_datetime(s: &str) -> bool {
+    let Some(t_pos) = s.find('T') else {
+        return false;
+    };
+    let time_part = &s[t_pos..];
+    !time_part.ends_with('Z') && !time_part.contains('+') && !time_part.contains('-')
+}
+
+fn warn_naive_start(start: &str) {
+    if is_naive_datetime(start) {
+        eprintln!(
+            "Warning: --start '{start}' has no timezone offset. Zoom will interpret it as UTC. \
+             Append 'Z' for UTC or a UTC offset (e.g. +02:00) to be explicit."
+        );
+    }
+}
+
 pub async fn list(
     client: &mut ZoomClient,
     out: &OutputConfig,
@@ -92,6 +115,9 @@ pub async fn create(
     start: Option<String>,
     password: Option<String>,
 ) -> Result<(), ApiError> {
+    if let Some(s) = &start {
+        warn_naive_start(s);
+    }
     let meeting_type = if start.is_some() { 2 } else { 1 };
     let req = CreateMeetingRequest {
         topic,
@@ -127,6 +153,9 @@ pub async fn update(
     duration: Option<u32>,
     start: Option<String>,
 ) -> Result<(), ApiError> {
+    if let Some(s) = &start {
+        warn_naive_start(s);
+    }
     let req = UpdateMeetingRequest {
         topic,
         duration,
@@ -226,6 +255,25 @@ mod tests {
             json: true,
             quiet: true,
         }
+    }
+
+    #[test]
+    fn is_naive_datetime_identifies_naive_strings() {
+        assert!(is_naive_datetime("2026-04-01T09:00:00"), "no timezone = naive");
+        assert!(is_naive_datetime("2026-04-01T09:00:00.000"), "fractional seconds, no tz = naive");
+    }
+
+    #[test]
+    fn is_naive_datetime_accepts_tz_aware_strings() {
+        assert!(!is_naive_datetime("2026-04-01T09:00:00Z"), "Z suffix = tz-aware");
+        assert!(!is_naive_datetime("2026-04-01T09:00:00+05:30"), "positive offset = tz-aware");
+        assert!(!is_naive_datetime("2026-04-01T09:00:00-05:00"), "negative offset = tz-aware");
+    }
+
+    #[test]
+    fn is_naive_datetime_returns_false_for_date_only() {
+        assert!(!is_naive_datetime("2026-04-01"), "date-only has no time component");
+        assert!(!is_naive_datetime(""), "empty string");
     }
 
     #[tokio::test]

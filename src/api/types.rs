@@ -251,6 +251,37 @@ pub struct UserMeetingReportList {
     pub page_size: Option<u32>,
 }
 
+// ── Webinar ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Webinar {
+    pub id: u64,
+    pub topic: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub join_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agenda: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub webinar_type: Option<u8>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct WebinarList {
+    pub webinars: Vec<Webinar>,
+    #[serde(skip_serializing_if = "is_none_or_empty")]
+    pub next_page_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_records: Option<u64>,
+    #[serde(skip_serializing)]
+    pub page_size: Option<u32>,
+}
+
 // ── Paginated impls ───────────────────────────────────────────────────────────
 
 impl Paginated for MeetingList {
@@ -309,6 +340,17 @@ impl Paginated for UserMeetingReportList {
 
     fn append_page(&mut self, next: Self) {
         self.meetings.extend(next.meetings);
+        self.next_page_token = next.next_page_token.filter(|t| !t.is_empty());
+    }
+}
+
+impl Paginated for WebinarList {
+    fn next_page_token(&self) -> Option<&str> {
+        self.next_page_token.as_deref().filter(|s| !s.is_empty())
+    }
+
+    fn append_page(&mut self, next: Self) {
+        self.webinars.extend(next.webinars);
         self.next_page_token = next.next_page_token.filter(|t| !t.is_empty());
     }
 }
@@ -623,6 +665,68 @@ mod tests {
         };
         first.append_page(second);
         assert_eq!(first.recordings.as_ref().unwrap().len(), 2);
+        assert_eq!(first.next_page_token(), None);
+    }
+
+    #[test]
+    fn webinar_list_deserializes_and_serializes() {
+        let json = r#"{
+            "webinars": [
+                {
+                    "id": 12345678,
+                    "topic": "Product Launch",
+                    "start_time": "2026-05-01T14:00:00Z",
+                    "duration": 60,
+                    "type": 5
+                }
+            ],
+            "total_records": 1,
+            "page_size": 300
+        }"#;
+        let list: WebinarList = serde_json::from_str(json).unwrap();
+        assert_eq!(list.webinars.len(), 1);
+        assert_eq!(list.webinars[0].id, 12345678);
+        assert_eq!(list.webinars[0].topic, "Product Launch");
+        assert_eq!(list.webinars[0].webinar_type, Some(5));
+        // page_size must not appear in output
+        let v: serde_json::Value = serde_json::to_value(&list).unwrap();
+        assert!(v.get("page_size").is_none());
+    }
+
+    #[test]
+    fn webinar_list_paginated_append_merges_items() {
+        let mut first = WebinarList {
+            webinars: vec![Webinar {
+                id: 1,
+                topic: "First".into(),
+                start_time: None,
+                duration: None,
+                join_url: None,
+                agenda: None,
+                status: None,
+                webinar_type: None,
+            }],
+            next_page_token: Some("tok".into()),
+            total_records: Some(2),
+            page_size: None,
+        };
+        let second = WebinarList {
+            webinars: vec![Webinar {
+                id: 2,
+                topic: "Second".into(),
+                start_time: None,
+                duration: None,
+                join_url: None,
+                agenda: None,
+                status: None,
+                webinar_type: None,
+            }],
+            next_page_token: Some("".into()),
+            total_records: Some(2),
+            page_size: None,
+        };
+        first.append_page(second);
+        assert_eq!(first.webinars.len(), 2);
         assert_eq!(first.next_page_token(), None);
     }
 

@@ -180,6 +180,21 @@ pub async fn download(
     Ok(())
 }
 
+pub async fn delete(
+    client: &mut ZoomClient,
+    out: &OutputConfig,
+    meeting_id: &str,
+    trash: bool,
+) -> Result<(), ApiError> {
+    client.delete_recording(meeting_id, trash).await?;
+    let disposition = if trash { "moved to trash" } else { "permanently deleted" };
+    out.print_result(
+        &serde_json::json!({"deleted": true, "meeting_id": meeting_id, "trash": trash}),
+        &format!("Recordings for meeting {meeting_id} {disposition}."),
+    );
+    Ok(())
+}
+
 pub async fn control(
     client: &mut ZoomClient,
     out: &OutputConfig,
@@ -289,6 +304,49 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ApiError::Api { .. }));
+    }
+
+    #[tokio::test]
+    async fn recordings_delete_moves_to_trash_by_default() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/v2/meetings/abc123/recordings"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        delete(&mut client, &test_out(), "abc123", true).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn recordings_delete_permanent_on_no_trash() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/v2/meetings/abc123/recordings"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        delete(&mut client, &test_out(), "abc123", false).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn recordings_delete_not_found_propagates() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/v2/meetings/nope/recordings"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Meeting not found"))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        let err = delete(&mut client, &test_out(), "nope", true).await.unwrap_err();
+        assert!(matches!(err, ApiError::NotFound(_)));
     }
 
     #[tokio::test]
