@@ -152,9 +152,15 @@ mod tests {
             .await
             .unwrap();
         let captured = buf.lock().unwrap().join("\n");
-        assert!(captured.contains("Weekly Standup"), "table must include topic");
+        assert!(
+            captured.contains("Weekly Standup"),
+            "table must include topic"
+        );
         assert!(captured.contains("30 min"), "table must include duration");
-        assert!(captured.contains("8"), "table must include participant count");
+        assert!(
+            captured.contains("8"),
+            "table must include participant count"
+        );
     }
 
     #[tokio::test]
@@ -181,7 +187,10 @@ mod tests {
         let (out, buf) = OutputConfig::capturing();
         participants(&mut client, &out, "123456789").await.unwrap();
         let captured = buf.lock().unwrap().join("\n");
-        assert!(captured.contains("Alice"), "table must include participant name");
+        assert!(
+            captured.contains("Alice"),
+            "table must include participant name"
+        );
         assert!(
             captured.contains("alice@example.com"),
             "table must include email"

@@ -587,7 +587,10 @@ client_secret = "w-csec"
             "write_profile must not destroy comments in unrelated sections"
         );
         assert!(after.contains("[default]"), "new profile must be present");
-        assert!(after.contains("[work]"), "existing profile must be preserved");
+        assert!(
+            after.contains("[work]"),
+            "existing profile must be preserved"
+        );
     }
 
     #[test]
