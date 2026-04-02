@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -37,7 +37,7 @@ impl Config {
             .or_else(|| normalize(file_profile.account_id))
             .ok_or_else(|| {
                 ApiError::InvalidInput(
-                    "No account_id configured. Set ZOOM_ACCOUNT_ID or add it to ~/.config/zoom-cli/config.toml".into(),
+                    "No account_id configured. Run 'zoom init' or set ZOOM_ACCOUNT_ID.".into(),
                 )
             })?;
 
@@ -45,7 +45,7 @@ impl Config {
             .or_else(|| normalize(file_profile.client_id))
             .ok_or_else(|| {
                 ApiError::InvalidInput(
-                    "No client_id configured. Set ZOOM_CLIENT_ID or add it to ~/.config/zoom-cli/config.toml".into(),
+                    "No client_id configured. Run 'zoom init' or set ZOOM_CLIENT_ID.".into(),
                 )
             })?;
 
@@ -53,7 +53,7 @@ impl Config {
             .or_else(|| normalize(file_profile.client_secret))
             .ok_or_else(|| {
                 ApiError::InvalidInput(
-                    "No client_secret configured. Set ZOOM_CLIENT_SECRET or add it to ~/.config/zoom-cli/config.toml".into(),
+                    "No client_secret configured. Run 'zoom init' or set ZOOM_CLIENT_SECRET.".into(),
                 )
             })?;
 
@@ -130,6 +130,55 @@ fn normalize(value: Option<String>) -> Option<String> {
         let t = v.trim().to_owned();
         if t.is_empty() { None } else { Some(t) }
     })
+}
+
+/// Write (or overwrite) a single profile in the config file, preserving other profiles.
+///
+/// Creates the config directory and file if they don't exist, then sets
+/// permissions to 0600 on unix.
+pub fn write_profile(
+    path: &Path,
+    profile_name: &str,
+    account_id: &str,
+    client_id: &str,
+    client_secret: &str,
+) -> Result<(), ApiError> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(ApiError::Other(format!("Failed to read config: {e}"))),
+    };
+
+    let mut table: toml::Table = if content.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        toml::from_str(&content)
+            .map_err(|e| ApiError::Other(format!("Failed to parse config: {e}")))?
+    };
+
+    let mut profile = toml::Table::new();
+    profile.insert("account_id".into(), toml::Value::String(account_id.to_owned()));
+    profile.insert("client_id".into(), toml::Value::String(client_id.to_owned()));
+    profile.insert("client_secret".into(), toml::Value::String(client_secret.to_owned()));
+    table.insert(profile_name.to_owned(), toml::Value::Table(profile));
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ApiError::Other(format!("Cannot create config directory: {e}")))?;
+    }
+
+    let serialized = toml::to_string_pretty(&table)
+        .map_err(|e| ApiError::Other(format!("Failed to serialize config: {e}")))?;
+    std::fs::write(path, serialized)
+        .map_err(|e| ApiError::Other(format!("Failed to write config: {e}")))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    Ok(())
 }
 
 pub fn schema_config_path_description() -> &'static str {

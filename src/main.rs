@@ -46,6 +46,13 @@ enum Command {
     #[command(subcommand, arg_required_else_help = true)]
     Reports(ReportsCommand),
 
+    /// Set up credentials interactively (or print JSON schema for agents)
+    Init {
+        /// Profile name to create or update (default: "default")
+        #[arg(long)]
+        profile: Option<String>,
+    },
+
     /// Print schema/field reference for a resource
     Schema {
         /// Resource name: meetings, recordings, users
@@ -180,8 +187,15 @@ async fn main() {
     let cli = Cli::parse();
     let out = OutputConfig::new(cli.json, cli.quiet);
 
-    // Schema and completions do not require credentials.
+    // These commands do not require credentials.
     match &cli.command {
+        Command::Init { profile } => {
+            if let Err(e) = commands::init::init(profile.clone()).await {
+                eprintln!("{e}");
+                std::process::exit(exit_codes::for_error(&e));
+            }
+            return;
+        }
         Command::Schema { resource } => {
             commands::schema(resource, &out);
             return;
@@ -271,7 +285,9 @@ async fn main() {
                 commands::reports::meetings(&mut client, &out, &user, &from, to.as_deref()).await
             }
         },
-        Command::Schema { .. } | Command::Completions { .. } => unreachable!(),
+        Command::Init { .. } | Command::Schema { .. } | Command::Completions { .. } => {
+            unreachable!()
+        }
     };
 
     if let Err(e) = result {
