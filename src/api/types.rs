@@ -112,6 +112,30 @@ pub struct UserList {
     pub page_size: Option<u32>,
 }
 
+// ── User management ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct CreateUserInfo {
+    pub email: String,
+    #[serde(rename = "type")]
+    pub user_type: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateUserRequest {
+    pub action: String,
+    pub user_info: CreateUserInfo,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserStatusRequest {
+    pub action: String,
+}
+
 // ── Recording ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -189,6 +189,22 @@ enum UsersCommand {
     Get { id_or_email: String },
     /// Get the current user
     Me,
+    /// Create a new user
+    Create {
+        #[arg(long)]
+        email: String,
+        #[arg(long)]
+        first_name: Option<String>,
+        #[arg(long)]
+        last_name: Option<String>,
+        /// User type: 1=Basic, 2=Licensed, 3=On-prem
+        #[arg(long, default_value = "1")]
+        r#type: u8,
+    },
+    /// Deactivate a user
+    Deactivate { id_or_email: String },
+    /// Activate (reactivate) a user
+    Activate { id_or_email: String },
 }
 
 #[derive(Subcommand)]
@@ -325,6 +341,21 @@ async fn main() {
                 commands::users::get(&mut client, &out, &id_or_email).await
             }
             UsersCommand::Me => commands::users::me(&mut client, &out).await,
+            UsersCommand::Create {
+                email,
+                first_name,
+                last_name,
+                r#type,
+            } => {
+                commands::users::create(&mut client, &out, email, first_name, last_name, r#type)
+                    .await
+            }
+            UsersCommand::Deactivate { id_or_email } => {
+                commands::users::deactivate(&mut client, &out, &id_or_email).await
+            }
+            UsersCommand::Activate { id_or_email } => {
+                commands::users::activate(&mut client, &out, &id_or_email).await
+            }
         },
         Command::Reports(cmd) => match cmd {
             ReportsCommand::Meetings { user, from, to } => {

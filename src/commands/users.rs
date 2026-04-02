@@ -68,6 +68,53 @@ pub async fn me(client: &mut ZoomClient, out: &OutputConfig) -> Result<(), ApiEr
     get(client, out, "me").await
 }
 
+pub async fn create(
+    client: &mut ZoomClient,
+    out: &OutputConfig,
+    email: String,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    user_type: u8,
+) -> Result<(), ApiError> {
+    use crate::api::types::{CreateUserInfo, CreateUserRequest};
+    let req = CreateUserRequest {
+        action: "create".into(),
+        user_info: CreateUserInfo {
+            email,
+            user_type,
+            first_name,
+            last_name,
+        },
+    };
+    let user = client.create_user(req).await?;
+    if out.json {
+        out.print_data(&serde_json::to_string_pretty(&user).expect("serialize"));
+    } else {
+        out.print_message(&format!("Created user: {} ({})", user.email, user.id));
+    }
+    Ok(())
+}
+
+pub async fn deactivate(
+    client: &mut ZoomClient,
+    out: &OutputConfig,
+    id_or_email: &str,
+) -> Result<(), ApiError> {
+    client.set_user_status(id_or_email, "deactivate").await?;
+    out.print_message(&format!("User {} deactivated.", id_or_email));
+    Ok(())
+}
+
+pub async fn activate(
+    client: &mut ZoomClient,
+    out: &OutputConfig,
+    id_or_email: &str,
+) -> Result<(), ApiError> {
+    client.set_user_status(id_or_email, "activate").await?;
+    out.print_message(&format!("User {} activated.", id_or_email));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,5 +179,70 @@ mod tests {
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         me(&mut client, &test_out_json()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn users_create_returns_created_user() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v2/users"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "new-user-id",
+                "email": "jane@example.com",
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "status": "active"
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        create(
+            &mut client,
+            &test_out_json(),
+            "jane@example.com".into(),
+            Some("Jane".into()),
+            Some("Doe".into()),
+            1,
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn users_deactivate_sends_correct_action() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/v2/users/u1/status"))
+            .and(wiremock::matchers::body_json(
+                serde_json::json!({"action": "deactivate"}),
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        deactivate(&mut client, &test_out_json(), "u1")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn users_activate_sends_correct_action() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/v2/users/u1/status"))
+            .and(wiremock::matchers::body_json(
+                serde_json::json!({"action": "activate"}),
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        activate(&mut client, &test_out_json(), "u1").await.unwrap();
     }
 }

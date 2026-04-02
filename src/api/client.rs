@@ -360,6 +360,17 @@ impl ZoomClient {
         self.get(&format!("/users/{user_id}")).await
     }
 
+    pub async fn create_user(&mut self, req: CreateUserRequest) -> Result<User, ApiError> {
+        self.post("/users", &req).await
+    }
+
+    pub async fn set_user_status(&mut self, user_id: &str, action: &str) -> Result<(), ApiError> {
+        let req = UserStatusRequest {
+            action: action.into(),
+        };
+        self.put(&format!("/users/{user_id}/status"), &req).await
+    }
+
     // ── Participants ─────────────────────────────────────────────────────────
 
     pub async fn list_past_meeting_participants(
