@@ -155,6 +155,13 @@ pub struct RecordingList {
     pub to: Option<String>,
 }
 
+// ── Recording control ────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct RecordingControlRequest {
+    pub action: String,
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]

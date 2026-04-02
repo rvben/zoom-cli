@@ -284,6 +284,19 @@ impl ZoomClient {
         self.get_with_query(&path, &params).await
     }
 
+    /// Control recording state for a live meeting (start/stop/pause/resume).
+    pub async fn control_recording(
+        &mut self,
+        meeting_id: u64,
+        action: &str,
+    ) -> Result<(), ApiError> {
+        let req = RecordingControlRequest {
+            action: action.to_owned(),
+        };
+        self.patch(&format!("/live_meetings/{meeting_id}/recordings"), &req)
+            .await
+    }
+
     pub async fn get_recording(&mut self, meeting_id: &str) -> Result<CloudRecording, ApiError> {
         // Zoom meeting UUIDs can contain '/' (base64 chars); encode it so the
         // character is not interpreted as a path separator.

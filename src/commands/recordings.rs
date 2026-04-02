@@ -180,6 +180,20 @@ pub async fn download(
     Ok(())
 }
 
+pub async fn control(
+    client: &mut ZoomClient,
+    out: &OutputConfig,
+    meeting_id: u64,
+    action: &str,
+) -> Result<(), ApiError> {
+    client.control_recording(meeting_id, action).await?;
+    out.print_result(
+        &serde_json::json!({"action": action, "meeting_id": meeting_id}),
+        &format!("Recording {action}ed for meeting {meeting_id}."),
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +253,42 @@ mod tests {
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         get(&mut client, &test_out(), "abc123").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn recordings_control_start_sends_patch() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/v2/live_meetings/999888777/recordings"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        control(&mut client, &test_out(), 999888777, "start")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn recordings_control_invalid_meeting_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/v2/live_meetings/111/recordings"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "code": 3001,
+                "message": "Meeting does not exist"
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        let err = control(&mut client, &test_out(), 111, "start")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ApiError::Api { .. }));
     }
 
     #[tokio::test]

@@ -114,6 +114,26 @@ enum RecordingsCommand {
         #[arg(long, default_value = ".")]
         out: String,
     },
+    /// Start cloud recording for a live meeting
+    Start {
+        /// Numeric meeting ID of the live meeting
+        meeting_id: u64,
+    },
+    /// Stop cloud recording for a live meeting
+    Stop {
+        /// Numeric meeting ID of the live meeting
+        meeting_id: u64,
+    },
+    /// Pause cloud recording for a live meeting
+    Pause {
+        /// Numeric meeting ID of the live meeting
+        meeting_id: u64,
+    },
+    /// Resume cloud recording for a live meeting
+    Resume {
+        /// Numeric meeting ID of the live meeting
+        meeting_id: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -194,6 +214,18 @@ async fn main() {
                 meeting_id,
                 out: out_dir,
             } => commands::recordings::download(&mut client, &out, &meeting_id, &out_dir).await,
+            RecordingsCommand::Start { meeting_id } => {
+                commands::recordings::control(&mut client, &out, meeting_id, "start").await
+            }
+            RecordingsCommand::Stop { meeting_id } => {
+                commands::recordings::control(&mut client, &out, meeting_id, "stop").await
+            }
+            RecordingsCommand::Pause { meeting_id } => {
+                commands::recordings::control(&mut client, &out, meeting_id, "pause").await
+            }
+            RecordingsCommand::Resume { meeting_id } => {
+                commands::recordings::control(&mut client, &out, meeting_id, "resume").await
+            }
         },
         Command::Users(cmd) => match cmd {
             UsersCommand::List { status } => {
