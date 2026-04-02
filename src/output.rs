@@ -11,8 +11,8 @@ pub struct OutputConfig {
 }
 
 impl OutputConfig {
-    pub fn new(json_flag: bool, _quiet: bool) -> Self {
-        Self { json: json_flag, quiet: _quiet }
+    pub fn new(json_flag: bool, quiet: bool) -> Self {
+        Self { json: json_flag, quiet }
     }
     pub fn print_data(&self, data: &str) { println!("{data}"); }
     pub fn print_message(&self, msg: &str) { if !self.quiet { eprintln!("{msg}"); } }
