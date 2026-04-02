@@ -67,7 +67,7 @@ pub async fn participants(
             .iter()
             .map(|p| {
                 vec![
-                    p.name.clone(),
+                    p.name.clone().unwrap_or_default(),
                     p.user_email.clone().unwrap_or_default(),
                     p.join_time
                         .as_deref()

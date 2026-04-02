@@ -1,3 +1,4 @@
+use crate::api::types::{CreateUserInfo, CreateUserRequest};
 use crate::api::{ApiError, ZoomClient};
 use crate::output::{self, OutputConfig};
 
@@ -76,7 +77,6 @@ pub async fn create(
     last_name: Option<String>,
     user_type: u8,
 ) -> Result<(), ApiError> {
-    use crate::api::types::{CreateUserInfo, CreateUserRequest};
     let req = CreateUserRequest {
         action: "create".into(),
         user_info: CreateUserInfo {
@@ -186,6 +186,15 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v2/users"))
+            .and(wiremock::matchers::body_json(serde_json::json!({
+                "action": "create",
+                "user_info": {
+                    "email": "jane@example.com",
+                    "type": 1,
+                    "first_name": "Jane",
+                    "last_name": "Doe"
+                }
+            })))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "id": "new-user-id",
                 "email": "jane@example.com",

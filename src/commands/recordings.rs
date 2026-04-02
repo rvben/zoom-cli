@@ -1,6 +1,22 @@
 use crate::api::{ApiError, ZoomClient};
 use crate::output::{self, OutputConfig};
 
+/// Sanitize a string for use as a filename component.
+///
+/// Passes through alphanumeric characters, `-`, and `_` unchanged (lowercased).
+/// All other characters are replaced with `_`.
+fn sanitize_path_component(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 pub async fn list(
     client: &mut ZoomClient,
     out: &OutputConfig,
@@ -138,36 +154,13 @@ pub async fn download(
             _ => "bin",
         };
 
-        let safe_topic: String = recording
-            .topic
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-
+        let safe_topic = sanitize_path_component(&recording.topic);
         // Use recording_type (e.g. "shared_screen_with_speaker_view") as the
         // filename discriminator; multiple files of the same file_type (e.g.
         // two MP4 tracks) each have a distinct recording_type and won't
-        // overwrite each other. Sanitize to alphanumeric plus safe punctuation
-        // so API-sourced values cannot introduce path traversal components.
-        let discriminator: String = file
-            .recording_type
-            .as_deref()
-            .unwrap_or(file_type)
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' {
-                    c.to_ascii_lowercase()
-                } else {
-                    '_'
-                }
-            })
-            .collect();
+        // overwrite each other.
+        let discriminator =
+            sanitize_path_component(file.recording_type.as_deref().unwrap_or(file_type));
         let filename = format!(
             "{}_{}_{}.{}",
             safe_topic,
@@ -233,30 +226,9 @@ pub async fn transcript(
 
         // Sanitize the meeting_id so API-sourced values cannot introduce path
         // traversal components.
-        let safe_id: String = meeting_id
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' {
-                    c.to_ascii_lowercase()
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-
-        let discriminator: String = file
-            .recording_type
-            .as_deref()
-            .unwrap_or(file_type)
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' {
-                    c.to_ascii_lowercase()
-                } else {
-                    '_'
-                }
-            })
-            .collect();
+        let safe_id = sanitize_path_component(meeting_id);
+        let discriminator =
+            sanitize_path_component(file.recording_type.as_deref().unwrap_or(file_type));
 
         let filename = format!("{safe_id}_{discriminator}.{ext}");
         let dest = dir.join(&filename);
@@ -475,6 +447,7 @@ mod tests {
                         "id": "rf-tr-001",
                         "file_type": "TRANSCRIPT",
                         "file_extension": "VTT",
+                        "recording_type": "audio_transcript",
                         "download_url": format!("{}/download/test-transcript.vtt", server.uri()),
                         "status": "completed"
                     }
@@ -505,7 +478,7 @@ mod tests {
         .unwrap();
 
         // Verify the file was written to disk
-        let dest = tmp.path().join("mtg-abc_transcript.vtt");
+        let dest = tmp.path().join("mtg-abc_audio_transcript.vtt");
         assert!(dest.exists(), "transcript file must be written to disk");
     }
 

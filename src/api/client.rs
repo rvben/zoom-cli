@@ -304,10 +304,8 @@ impl ZoomClient {
     ) -> Result<MeetingList, ApiError> {
         let path = format!("/users/{user_id}/meetings");
         let mut params: Vec<(&str, &str)> = vec![("page_size", "300")];
-        let mt_owned;
         if let Some(mt) = meeting_type {
-            mt_owned = mt.to_owned();
-            params.push(("type", mt_owned.as_str()));
+            params.push(("type", mt));
         }
         self.get_all_pages(&path, &params).await
     }
@@ -358,10 +356,8 @@ impl ZoomClient {
 
     pub async fn list_users(&mut self, status: Option<&str>) -> Result<UserList, ApiError> {
         let mut params: Vec<(&str, &str)> = vec![("page_size", "300")];
-        let st_owned;
         if let Some(st) = status {
-            st_owned = st.to_owned();
-            params.push(("status", st_owned.as_str()));
+            params.push(("status", st));
         }
         self.get_all_pages("/users", &params).await
     }
@@ -405,15 +401,11 @@ impl ZoomClient {
     ) -> Result<RecordingList, ApiError> {
         let path = format!("/users/{user_id}/recordings");
         let mut params: Vec<(&str, &str)> = vec![("page_size", "300")];
-        let from_owned;
-        let to_owned;
         if let Some(f) = from {
-            from_owned = f.to_owned();
-            params.push(("from", from_owned.as_str()));
+            params.push(("from", f));
         }
         if let Some(t) = to {
-            to_owned = t.to_owned();
-            params.push(("to", to_owned.as_str()));
+            params.push(("to", t));
         }
         self.get_all_pages(&path, &params).await
     }

@@ -292,7 +292,8 @@ pub struct MeetingParticipantReport {
     pub id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
-    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -414,7 +415,7 @@ impl Paginated for MeetingParticipantReportList {
     }
     fn append_page(&mut self, next: Self) {
         self.participants.extend(next.participants);
-        self.next_page_token = next.next_page_token;
+        self.next_page_token = next.next_page_token.filter(|t| !t.is_empty());
     }
 }
 

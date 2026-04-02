@@ -240,8 +240,14 @@ fn env_var(name: &str) -> Option<String> {
 
 fn normalize(value: Option<String>) -> Option<String> {
     value.and_then(|v| {
-        let t = v.trim().to_owned();
-        if t.is_empty() { None } else { Some(t) }
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else if trimmed.len() == v.len() {
+            Some(v)
+        } else {
+            Some(trimmed.to_owned())
+        }
     })
 }
 

@@ -265,7 +265,10 @@ async fn main() {
             return;
         }
         Command::Config(ConfigCommand::Delete { profile, force }) => {
-            commands::config::delete(profile, *force, &out);
+            if let Err(e) = commands::config::delete(profile, *force, &out) {
+                eprintln!("{e}");
+                std::process::exit(exit_codes::for_error(&e));
+            }
             return;
         }
         Command::Init { profile } => {

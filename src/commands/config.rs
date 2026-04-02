@@ -1,3 +1,4 @@
+use crate::api::ApiError;
 use crate::config;
 use crate::output::{self, OutputConfig};
 
@@ -87,7 +88,7 @@ pub fn show(profile_arg: Option<&str>, out: &OutputConfig) {
     }
 }
 
-pub fn delete(profile_name: &str, force: bool, out: &OutputConfig) {
+pub fn delete(profile_name: &str, force: bool, out: &OutputConfig) -> Result<(), ApiError> {
     let config_path = config::config_path();
 
     if !force {
@@ -96,23 +97,21 @@ pub fn delete(profile_name: &str, force: bool, out: &OutputConfig) {
         if !std::io::stdin().is_terminal() {
             eprintln!();
             eprintln!("Use --force to delete non-interactively.");
-            std::process::exit(crate::output::exit_codes::CONFIG_ERROR);
+            return Err(ApiError::Other(
+                "stdin is not a terminal; use --force to delete non-interactively".into(),
+            ));
         }
         let mut input = String::new();
         std::io::stdin().lock().read_line(&mut input).unwrap_or(0);
         if input.trim().to_lowercase() != "y" {
             out.print_message("Aborted.");
-            return;
+            return Ok(());
         }
     }
 
-    match config::delete_profile(&config_path, profile_name) {
-        Ok(()) => out.print_message(&format!("Profile '{profile_name}' deleted.")),
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(crate::output::exit_codes::for_error(&e));
-        }
-    }
+    config::delete_profile(&config_path, profile_name)?;
+    out.print_message(&format!("Profile '{profile_name}' deleted."));
+    Ok(())
 }
 
 fn masked_or_unset(value: &Option<String>) -> String {
@@ -286,13 +285,12 @@ client_secret = "work-csec"
         .unwrap();
 
         let _cfg_dir = set_config_dir_env(dir.path());
-        let path = dir.path().join("zoom-cli").join("config.toml");
-        config::delete_profile(&path, "work").unwrap();
-
         let _env_acct = EnvVarGuard::unset("ZOOM_ACCOUNT_ID");
         let _env_cid = EnvVarGuard::unset("ZOOM_CLIENT_ID");
         let _env_csec = EnvVarGuard::unset("ZOOM_CLIENT_SECRET");
         let _env_prof = EnvVarGuard::unset("ZOOM_PROFILE");
+        let path = dir.path().join("zoom-cli").join("config.toml");
+        config::delete_profile(&path, "work").unwrap();
 
         let summary = config::load_for_show(None);
         assert_eq!(summary.profiles.len(), 1);
