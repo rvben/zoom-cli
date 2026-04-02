@@ -306,6 +306,14 @@ impl ZoomClient {
         self.get(&format!("/meetings/{meeting_id}")).await
     }
 
+    pub async fn get_meeting_invitation(
+        &mut self,
+        meeting_id: u64,
+    ) -> Result<MeetingInvitation, ApiError> {
+        self.get(&format!("/meetings/{meeting_id}/invitation"))
+            .await
+    }
+
     pub async fn create_meeting(
         &mut self,
         user_id: &str,

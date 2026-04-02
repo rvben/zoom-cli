@@ -180,6 +180,13 @@ pub struct MeetingStatusRequest {
     pub action: String,
 }
 
+// ── Meeting invitation ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MeetingInvitation {
+    pub invitation: String,
+}
+
 // ── Participants ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

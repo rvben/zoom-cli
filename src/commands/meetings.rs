@@ -243,6 +243,20 @@ pub async fn participants(
     Ok(())
 }
 
+pub async fn invite(
+    client: &mut ZoomClient,
+    out: &OutputConfig,
+    meeting_id: u64,
+) -> Result<(), ApiError> {
+    let inv = client.get_meeting_invitation(meeting_id).await?;
+    if out.json {
+        out.print_data(&serde_json::to_string_pretty(&inv).expect("serialize"));
+    } else {
+        out.print_data(&inv.invitation);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,6 +415,26 @@ mod tests {
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
         end(&mut client, &test_out(), 555666777).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn meetings_invite_returns_invitation_text() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v2/meetings/123456789/invitation"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "invitation": "Join Zoom Meeting\nhttps://zoom.us/j/123456789"
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        let out = OutputConfig {
+            json: true,
+            quiet: true,
+        };
+        invite(&mut client, &out, 123456789).await.unwrap();
     }
 
     #[tokio::test]

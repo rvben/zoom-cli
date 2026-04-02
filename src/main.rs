@@ -121,6 +121,8 @@ enum MeetingsCommand {
         /// Meeting ID or UUID
         meeting_id: String,
     },
+    /// Get meeting invitation text
+    Invite { id: u64 },
 }
 
 #[derive(Subcommand)]
@@ -281,6 +283,9 @@ async fn main() {
             MeetingsCommand::End { id } => commands::meetings::end(&mut client, &out, id).await,
             MeetingsCommand::Participants { meeting_id } => {
                 commands::meetings::participants(&mut client, &out, &meeting_id).await
+            }
+            MeetingsCommand::Invite { id } => {
+                commands::meetings::invite(&mut client, &out, id).await
             }
         },
         Command::Recordings(cmd) => match cmd {
