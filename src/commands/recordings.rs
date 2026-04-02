@@ -9,16 +9,10 @@ pub async fn list(
     to: Option<&str>,
 ) -> Result<(), ApiError> {
     let result = client.list_recordings(user, from, to).await?;
-    let recordings = result.meetings.unwrap_or_default();
+    let recordings = result.recordings.clone().unwrap_or_default();
 
     if out.json {
-        out.print_data(
-            &serde_json::to_string_pretty(&serde_json::json!({
-                "recordings": recordings,
-                "totalRecords": result.total_records
-            }))
-            .expect("serialize"),
-        );
+        out.print_data(&serde_json::to_string_pretty(&result).expect("serialize"));
     } else {
         if recordings.is_empty() {
             out.print_message("No recordings found.");
@@ -30,7 +24,7 @@ pub async fn list(
                 vec![
                     r.id.to_string(),
                     r.topic.clone(),
-                    r.start_time.clone(),
+                    output::format_timestamp(&r.start_time),
                     r.duration
                         .map(|d| format!("{d} min"))
                         .unwrap_or_else(|| "-".into()),
@@ -65,7 +59,7 @@ pub async fn get(
         out.print_data(&output::kv_block(&[
             ("id", recording.id.to_string()),
             ("topic", recording.topic.clone()),
-            ("start_time", recording.start_time.clone()),
+            ("start_time", output::format_timestamp(&recording.start_time)),
             (
                 "duration",
                 recording

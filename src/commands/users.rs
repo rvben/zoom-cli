@@ -9,13 +9,7 @@ pub async fn list(
     let result = client.list_users(status).await?;
 
     if out.json {
-        out.print_data(
-            &serde_json::to_string_pretty(&serde_json::json!({
-                "users": result.users,
-                "totalRecords": result.total_records
-            }))
-            .expect("serialize"),
-        );
+        out.print_data(&serde_json::to_string_pretty(&result).expect("serialize"));
     } else {
         if result.users.is_empty() {
             out.print_message("No users found.");

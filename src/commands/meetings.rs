@@ -11,13 +11,7 @@ pub async fn list(
     let result = client.list_meetings(user, meeting_type).await?;
 
     if out.json {
-        out.print_data(
-            &serde_json::to_string_pretty(&serde_json::json!({
-                "meetings": result.meetings,
-                "totalRecords": result.total_records
-            }))
-            .expect("serialize"),
-        );
+        out.print_data(&serde_json::to_string_pretty(&result).expect("serialize"));
     } else {
         if result.meetings.is_empty() {
             out.print_message("No meetings found.");
@@ -30,7 +24,10 @@ pub async fn list(
                 vec![
                     m.id.to_string(),
                     m.topic.clone(),
-                    m.start_time.clone().unwrap_or_else(|| "-".into()),
+                    m.start_time
+                        .as_deref()
+                        .map(output::format_timestamp)
+                        .unwrap_or_else(|| "-".into()),
                     m.duration
                         .map(|d| format!("{d} min"))
                         .unwrap_or_else(|| "-".into()),
@@ -64,7 +61,11 @@ pub async fn get(
             ("topic", meeting.topic.clone()),
             (
                 "start_time",
-                meeting.start_time.clone().unwrap_or_else(|| "-".into()),
+                meeting
+                    .start_time
+                    .as_deref()
+                    .map(output::format_timestamp)
+                    .unwrap_or_else(|| "-".into()),
             ),
             (
                 "duration",

@@ -76,6 +76,19 @@ pub mod exit_codes {
     }
 }
 
+/// Format an ISO 8601 UTC timestamp for human display.
+///
+/// `"2026-03-29T07:34:19Z"` → `"2026-03-29 07:34"`
+/// Strings that don't match the pattern (e.g. `"-"`) are returned unchanged.
+pub fn format_timestamp(ts: &str) -> String {
+    let inner = ts.strip_suffix('Z').unwrap_or(ts);
+    if let Some((date, time)) = inner.split_once('T') {
+        let hm = time.get(..5).unwrap_or(time);
+        return format!("{date} {hm}");
+    }
+    ts.to_string()
+}
+
 /// Render a simple two-column key/value block for single-resource output.
 pub fn kv_block(pairs: &[(&str, String)]) -> String {
     let max_key = pairs.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
@@ -166,6 +179,18 @@ mod tests {
         let out = table(&headers, &rows);
         let lines: Vec<&str> = out.lines().collect();
         assert!(lines[1].len() >= "much longer name".len());
+    }
+
+    #[test]
+    fn format_timestamp_formats_iso8601() {
+        assert_eq!(format_timestamp("2026-03-29T07:34:19Z"), "2026-03-29 07:34");
+        assert_eq!(format_timestamp("2020-04-06T17:15:00Z"), "2020-04-06 17:15");
+    }
+
+    #[test]
+    fn format_timestamp_passes_through_non_timestamps() {
+        assert_eq!(format_timestamp("-"), "-");
+        assert_eq!(format_timestamp(""), "");
     }
 
     #[test]
