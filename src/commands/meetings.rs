@@ -430,11 +430,7 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        let out = OutputConfig {
-            json: true,
-            quiet: true,
-        };
-        invite(&mut client, &out, 123456789).await.unwrap();
+        invite(&mut client, &test_out(), 123456789).await.unwrap();
     }
 
     #[tokio::test]
