@@ -176,6 +176,13 @@ enum RecordingsCommand {
         /// Numeric meeting ID of the live meeting
         meeting_id: u64,
     },
+    /// Download transcript files (VTT/chat) for a meeting
+    Transcript {
+        /// Meeting ID or UUID
+        meeting_id: String,
+        #[arg(long, default_value = ".")]
+        out: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -332,6 +339,10 @@ async fn main() {
                 meeting_id,
                 permanent,
             } => commands::recordings::delete(&mut client, &out, &meeting_id, !permanent).await,
+            RecordingsCommand::Transcript {
+                meeting_id,
+                out: out_dir,
+            } => commands::recordings::transcript(&mut client, &out, &meeting_id, &out_dir).await,
         },
         Command::Users(cmd) => match cmd {
             UsersCommand::List { status } => {

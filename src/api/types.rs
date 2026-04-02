@@ -160,6 +160,8 @@ pub struct RecordingFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_extension: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub file_size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub play_url: Option<String>,

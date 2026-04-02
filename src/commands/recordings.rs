@@ -191,6 +191,84 @@ pub async fn download(
     Ok(())
 }
 
+pub async fn transcript(
+    client: &mut ZoomClient,
+    out: &OutputConfig,
+    meeting_id: &str,
+    out_dir: &str,
+) -> Result<(), ApiError> {
+    let recording = client.get_recording(meeting_id).await?;
+    let files = recording.recording_files.unwrap_or_default();
+
+    let transcript_files: Vec<_> = files
+        .iter()
+        .filter(|f| matches!(f.file_type.as_deref(), Some("TRANSCRIPT") | Some("CHAT")))
+        .collect();
+
+    if transcript_files.is_empty() {
+        out.print_message("No transcript files found for this meeting.");
+        return Ok(());
+    }
+
+    let dir = std::path::Path::new(out_dir);
+    if !dir.exists() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| ApiError::Other(format!("Cannot create output directory: {e}")))?;
+    }
+
+    for file in transcript_files {
+        let download_url = match &file.download_url {
+            Some(u) => u,
+            None => continue,
+        };
+
+        let file_type = file.file_type.as_deref().unwrap_or("unknown");
+        let ext = file
+            .file_extension
+            .as_deref()
+            .map(|e| e.to_ascii_lowercase())
+            .unwrap_or_else(|| file_type.to_ascii_lowercase());
+
+        // Sanitize the meeting_id so API-sourced values cannot introduce path
+        // traversal components.
+        let safe_id: String = meeting_id
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+
+        let discriminator: String = file
+            .recording_type
+            .as_deref()
+            .unwrap_or(file_type)
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+
+        let filename = format!("{safe_id}_{discriminator}.{ext}");
+        let dest = dir.join(&filename);
+
+        out.print_message(&format!("Downloading {} → {}", file_type, dest.display()));
+
+        let bytes = client.download_recording_file(download_url, &dest).await?;
+        out.print_message(&format!("  {:.1} MB written", bytes as f64 / 1_048_576.0));
+        out.print_data(&dest.display().to_string());
+    }
+
+    Ok(())
+}
+
 pub async fn delete(
     client: &mut ZoomClient,
     out: &OutputConfig,
@@ -368,6 +446,56 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ApiError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn recordings_transcript_downloads_vtt_file() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/meetings/mtg-abc/recordings"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 111222333,
+                "topic": "Team Sync",
+                "start_time": "2026-04-01T10:00:00Z",
+                "duration": 30,
+                "recording_files": [
+                    {
+                        "id": "rf-tr-001",
+                        "file_type": "TRANSCRIPT",
+                        "file_extension": "VTT",
+                        "download_url": format!("{}/download/test-transcript.vtt", server.uri()),
+                        "status": "completed"
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/download/test-transcript.vtt"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello world\n"),
+            )
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        transcript(
+            &mut client,
+            &test_out(),
+            "mtg-abc",
+            tmp.path().to_str().unwrap(),
+        )
+        .await
+        .unwrap();
+
+        // Verify the file was written to disk
+        let dest = tmp.path().join("mtg-abc_transcript.vtt");
+        assert!(dest.exists(), "transcript file must be written to disk");
     }
 
     #[tokio::test]
