@@ -6,6 +6,7 @@ use owo_colors::OwoColorize;
 
 use crate::api::ApiError;
 use crate::config;
+use crate::output;
 
 const CORE_SCOPES: &[&str] = &[
     "meeting:read:list_meetings:master",
@@ -23,8 +24,11 @@ const OPTIONAL_SCOPES: &[&str] = &[
     "recording:write:recording:master",
 ];
 
+const OAUTH_URL: &str = "https://marketplace.zoom.us/develop/create";
+const SEP: &str = "──────────────────────────────────────";
+
 fn sym_q() -> String {
-    "?".green().to_string()
+    "?".green().bold().to_string()
 }
 
 fn sym_ok() -> String {
@@ -35,21 +39,19 @@ fn sym_fail() -> String {
     "✖".red().to_string()
 }
 
-fn mask_credential(s: &str) -> String {
-    if s.len() <= 10 {
-        return "•".repeat(s.len());
-    }
-    format!("{}…{}", &s[..6], &s[s.len() - 4..])
+fn sym_dim(s: &str) -> String {
+    s.dimmed().to_string()
 }
 
+/// Prompt with a default value. Returns the default when the user presses Enter.
 fn prompt_optional<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
     label: &str,
     default: &str,
 ) -> String {
-    write!(writer, "{} {} ({}): ", sym_q(), label, default.dimmed()).unwrap();
-    writer.flush().unwrap();
+    let _ = write!(writer, "{} {}  [{}]: ", sym_q(), label, sym_dim(default));
+    let _ = writer.flush();
 
     let mut input = String::new();
     reader.read_line(&mut input).unwrap_or(0);
@@ -57,24 +59,51 @@ fn prompt_optional<R: BufRead, W: Write>(
     if trimmed.is_empty() { default.to_owned() } else { trimmed }
 }
 
+/// Prompt for a required field, looping until a non-empty value is entered.
+/// Returns `None` on EOF or IO error so the caller can abort gracefully.
 fn prompt_required<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
     label: &str,
     hint: &str,
-) -> String {
+) -> Option<String> {
     loop {
-        write!(writer, "{} {} [{}]: ", sym_q(), label, hint.dimmed()).unwrap();
-        writer.flush().unwrap();
+        let _ = write!(writer, "{} {}  {}: ", sym_q(), label, sym_dim(&format!("[{hint}]")));
+        let _ = writer.flush();
 
         let mut input = String::new();
-        reader.read_line(&mut input).unwrap_or(0);
+        match reader.read_line(&mut input) {
+            Ok(0) | Err(_) => return None,
+            Ok(_) => {}
+        }
         let trimmed = input.trim().to_owned();
         if !trimmed.is_empty() {
-            return trimmed;
+            return Some(trimmed);
         }
-        writeln!(writer, "  {} {} is required.", sym_fail(), label).unwrap();
+        let _ = writeln!(writer, "  {} {} is required.", sym_fail(), label);
     }
+}
+
+/// Prompt for a credential field during a profile update. Shows the masked
+/// current value inline; pressing Enter keeps the existing value. Returns
+/// `None` on EOF.
+fn prompt_credential_update<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    label: &str,
+    current: &str,
+) -> Option<String> {
+    let hint = format!("{} (Enter to keep)", output::mask_credential(current));
+    let _ = write!(writer, "{} {}  {}: ", sym_q(), label, sym_dim(&hint));
+    let _ = writer.flush();
+
+    let mut input = String::new();
+    match reader.read_line(&mut input) {
+        Ok(0) | Err(_) => return None,
+        Ok(_) => {}
+    }
+    let trimmed = input.trim().to_owned();
+    Some(if trimmed.is_empty() { current.to_owned() } else { trimmed })
 }
 
 fn prompt_confirm<R: BufRead, W: Write>(
@@ -84,8 +113,8 @@ fn prompt_confirm<R: BufRead, W: Write>(
     default_yes: bool,
 ) -> bool {
     let hint = if default_yes { "Y/n" } else { "y/N" };
-    write!(writer, "{} {} [{}]: ", sym_q(), label, hint.dimmed()).unwrap();
-    writer.flush().unwrap();
+    let _ = write!(writer, "{} {}  [{}]: ", sym_q(), label, sym_dim(hint));
+    let _ = writer.flush();
 
     let mut input = String::new();
     reader.read_line(&mut input).unwrap_or(0);
@@ -136,6 +165,13 @@ fn load_existing_profile_names(config_path: &Path) -> Vec<String> {
 ///
 /// `validate` receives (account_id, client_id, client_secret) and returns
 /// `Some(display_name)` on success or `None` on auth failure.
+///
+/// The flow adapts to context:
+/// - **First-ever setup** (no config file): defaults to "default" profile,
+///   shows OAuth setup URL, prompts credentials.
+/// - **Config exists, no `--profile` flag**: shows existing profiles and asks
+///   whether to update an existing one or add a new one.
+/// - **`--profile` given**: updates that profile if it exists, otherwise adds it.
 pub async fn run_init<R, W, Fut>(
     reader: &mut R,
     writer: &mut W,
@@ -148,81 +184,140 @@ where
     W: Write,
     Fut: Future<Output = Option<String>>,
 {
-    let existing = load_existing_profile_names(config_path);
+    let _ = writeln!(writer, "\nzoom-cli");
+    let _ = writeln!(writer, "{SEP}\n");
 
-    if existing.is_empty() {
-        writeln!(writer, "\nWelcome to zoom-cli!\n").unwrap();
-        writeln!(
-            writer,
-            "This tool authenticates via a Zoom Server-to-Server OAuth app."
-        )
-        .unwrap();
-        writeln!(writer, "You'll need to create one at https://marketplace.zoom.us\n").unwrap();
+    let existing_profiles = load_existing_profile_names(config_path);
+    let is_first_setup = existing_profiles.is_empty();
+
+    // Determine the target profile and whether this is an update or a new entry.
+    let (profile_name, is_update) = if let Some(p) = profile_arg {
+        let is_update = existing_profiles.contains(&p.to_owned());
+        (p.to_owned(), is_update)
+    } else if is_first_setup {
+        // First run: silently use "default" — no need to ask.
+        ("default".to_owned(), false)
     } else {
-        writeln!(
-            writer,
-            "\nUpdating zoom-cli config — existing profiles: {}\n",
-            existing.join(", ")
-        )
-        .unwrap();
-    }
+        // Config exists: show what we have and ask what to do.
+        if existing_profiles.len() == 1 {
+            let p = &existing_profiles[0];
+            let acct = config::read_profile_credentials(config_path, p)
+                .map(|(a, _, _)| format!("  {}", output::mask_credential(&a)))
+                .unwrap_or_default();
+            let _ = writeln!(writer, "  Profile: {}{}\n", p.bold(), sym_dim(&acct));
+        } else {
+            let _ = writeln!(writer, "  Profiles:");
+            for p in &existing_profiles {
+                let acct = config::read_profile_credentials(config_path, p)
+                    .map(|(a, _, _)| format!("  {}", output::mask_credential(&a)))
+                    .unwrap_or_default();
+                let _ = writeln!(writer, "    {}{}", p, sym_dim(&acct));
+            }
+            let _ = writeln!(writer);
+        }
 
-    writeln!(writer, "Set up your Zoom Server-to-Server OAuth app:").unwrap();
-    writeln!(writer, "  1. https://marketplace.zoom.us/develop/create").unwrap();
-    writeln!(writer, "  2. Build App → Server-to-Server OAuth").unwrap();
-    writeln!(writer, "  3. Add scopes:\n").unwrap();
-    writeln!(writer, "     Core (required):").unwrap();
-    for scope in CORE_SCOPES {
-        writeln!(writer, "       • {scope}").unwrap();
-    }
-    writeln!(writer, "\n     Optional (end/participants/reports/recording-control):").unwrap();
-    for scope in OPTIONAL_SCOPES {
-        writeln!(writer, "       • {scope}").unwrap();
-    }
-    writeln!(writer, "\n  4. Activate the app\n").unwrap();
+        let action = prompt_optional(reader, writer, "Action  [update/add]", "update");
+        let _ = writeln!(writer);
 
-    write!(writer, "Press Enter when your app is ready (Ctrl+C to abort)... ").unwrap();
-    writer.flush().unwrap();
-    let mut _buf = String::new();
-    reader.read_line(&mut _buf).unwrap_or(0);
-    writeln!(writer).unwrap();
-
-    let profile_name = if let Some(p) = profile_arg {
-        p.to_owned()
-    } else {
-        prompt_optional(reader, writer, "Profile name", "default")
+        if action.trim().eq_ignore_ascii_case("add") {
+            let Some(name) = prompt_required(reader, writer, "Profile name", "e.g. work") else {
+                let _ = writeln!(writer, "\nAborted.");
+                return Ok(());
+            };
+            (name, false)
+        } else {
+            // update (default)
+            if existing_profiles.len() == 1 {
+                (existing_profiles[0].clone(), true)
+            } else {
+                let options = existing_profiles.join("/");
+                let chosen = prompt_optional(
+                    reader,
+                    writer,
+                    &format!("Profile  [{}]", options),
+                    &existing_profiles[0],
+                );
+                let profile = chosen.trim().to_owned();
+                if !existing_profiles.contains(&profile) {
+                    let _ = writeln!(writer, "\n  {} Unknown profile '{}'.", sym_fail(), profile);
+                    return Ok(());
+                }
+                (profile, true)
+            }
+        }
     };
 
-    let account_id = prompt_required(reader, writer, "Account ID", "from app credentials");
-    let client_id = prompt_required(reader, writer, "Client ID", "from app credentials");
-    let client_secret = prompt_required(reader, writer, "Client Secret", "from app credentials");
+    // For new profiles, show where to create the OAuth app — no gate, just context.
+    if !is_update {
+        let _ = writeln!(writer, "  {}", sym_dim("Create a Server-to-Server OAuth app at:"));
+        let _ = writeln!(writer, "  {}\n", sym_dim(OAUTH_URL));
+    }
 
-    writeln!(writer).unwrap();
-    writeln!(writer, "  Profile:       {}", profile_name.bold()).unwrap();
-    writeln!(writer, "  Account ID:    {}", mask_credential(&account_id)).unwrap();
-    writeln!(writer, "  Client ID:     {}", mask_credential(&client_id)).unwrap();
-    writeln!(writer, "  Client Secret: {}\n", mask_credential(&client_secret)).unwrap();
+    // Prompt for credentials.
+    let (account_id, client_id, client_secret) = if is_update {
+        let (cur_acct, cur_cid, cur_csec) =
+            config::read_profile_credentials(config_path, &profile_name)
+                .expect("update mode requires existing credentials");
+        let Some(account_id) =
+            prompt_credential_update(reader, writer, "Account ID", &cur_acct)
+        else {
+            let _ = writeln!(writer, "\nAborted.");
+            return Ok(());
+        };
+        let Some(client_id) =
+            prompt_credential_update(reader, writer, "Client ID", &cur_cid)
+        else {
+            let _ = writeln!(writer, "\nAborted.");
+            return Ok(());
+        };
+        let Some(client_secret) =
+            prompt_credential_update(reader, writer, "Client Secret", &cur_csec)
+        else {
+            let _ = writeln!(writer, "\nAborted.");
+            return Ok(());
+        };
+        (account_id, client_id, client_secret)
+    } else {
+        let Some(account_id) =
+            prompt_required(reader, writer, "Account ID", "from app credentials")
+        else {
+            let _ = writeln!(writer, "\nAborted.");
+            return Ok(());
+        };
+        let Some(client_id) =
+            prompt_required(reader, writer, "Client ID", "from app credentials")
+        else {
+            let _ = writeln!(writer, "\nAborted.");
+            return Ok(());
+        };
+        let Some(client_secret) =
+            prompt_required(reader, writer, "Client Secret", "from app credentials")
+        else {
+            let _ = writeln!(writer, "\nAborted.");
+            return Ok(());
+        };
+        (account_id, client_id, client_secret)
+    };
 
-    write!(writer, "{} Validating credentials... ", sym_q()).unwrap();
-    writer.flush().unwrap();
+    // Inline credential verification.
+    let _ = write!(writer, "\n  Verifying credentials...");
+    let _ = writer.flush();
     let validation = validate(account_id.clone(), client_id.clone(), client_secret.clone()).await;
 
     let save = match validation {
         Some(display_name) => {
-            writeln!(writer, "{} Connected as {}", sym_ok(), display_name.bold()).unwrap();
+            let _ = writeln!(writer, " {} Connected as {}", sym_ok(), display_name.bold());
             true
         }
         None => {
-            writeln!(writer, "{} Could not validate credentials.", sym_fail()).unwrap();
+            let _ = writeln!(writer, " {} Could not validate credentials.", sym_fail());
             prompt_confirm(reader, writer, "Save anyway?", false)
         }
     };
 
-    writeln!(writer).unwrap();
-
     if !save {
-        writeln!(writer, "Aborted. Config not saved.").unwrap();
-        writer.flush().unwrap();
+        let _ = writeln!(writer, "\nAborted. Config not saved.");
+        let _ = writer.flush();
         return Ok(());
     }
 
@@ -234,15 +329,21 @@ where
         &client_secret,
     )?;
 
-    writeln!(
+    let run_cmd = if profile_name == "default" {
+        "zoom users me".to_owned()
+    } else {
+        format!("zoom --profile {} users me", profile_name)
+    };
+
+    let _ = writeln!(writer, "\n{SEP}");
+    let _ = writeln!(
         writer,
-        "{} Config saved to {}\n",
+        "  {} Config saved to {}",
         sym_ok(),
-        config_path.display().to_string().bold()
-    )
-    .unwrap();
-    writeln!(writer, "Run: {}", "zoom users me".bold()).unwrap();
-    writer.flush().unwrap();
+        sym_dim(&config_path.display().to_string()),
+    );
+    let _ = writeln!(writer, "  Run: {}", run_cmd.bold());
+    let _ = writer.flush();
 
     Ok(())
 }
@@ -295,8 +396,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = fake_path(&dir);
 
-        // Enter: ready, default profile, account, client_id, secret
-        let input = b"\n\ntest-account-id\ntest-client-id\ntest-client-secret\n";
+        // First setup: no action or profile prompts — go straight to credentials.
+        let input = b"test-account-id\ntest-client-id\ntest-client-secret\n";
         let mut reader = Cursor::new(input.as_ref());
         let mut writer = Vec::<u8>::new();
 
@@ -325,7 +426,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = fake_path(&dir);
 
-        let input = b"\n\ntest-acct\ntest-cid\ntest-csec\n";
+        // First setup silently defaults to "default" profile.
+        let input = b"test-acct\ntest-cid\ntest-csec\n";
         let mut reader = Cursor::new(input.as_ref());
         let mut writer = Vec::<u8>::new();
 
@@ -351,8 +453,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = fake_path(&dir);
 
-        // One fewer line (no profile name prompt)
-        let input = b"\ntest-acct\ntest-cid\ntest-csec\n";
+        // --profile given: no action prompt, go straight to credentials.
+        let input = b"test-acct\ntest-cid\ntest-csec\n";
         let mut reader = Cursor::new(input.as_ref());
         let mut writer = Vec::<u8>::new();
 
@@ -378,7 +480,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = fake_path(&dir);
 
-        let input = b"\n\ntest-acct\ntest-cid\ntest-csec\nn\n";
+        let input = b"test-acct\ntest-cid\ntest-csec\nn\n";
         let mut reader = Cursor::new(input.as_ref());
         let mut writer = Vec::<u8>::new();
 
@@ -403,7 +505,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = fake_path(&dir);
 
-        let input = b"\n\ntest-acct\ntest-cid\ntest-csec\ny\n";
+        let input = b"test-acct\ntest-cid\ntest-csec\ny\n";
         let mut reader = Cursor::new(input.as_ref());
         let mut writer = Vec::<u8>::new();
 
@@ -433,7 +535,9 @@ mod tests {
         )
         .unwrap();
 
-        let input = b"\n\nnew-account\nnew-client\nnew-secret\n";
+        // Config exists: \n accepts the "update" default at the action prompt,
+        // then new values replace each credential.
+        let input = b"\nnew-account\nnew-client\nnew-secret\n";
         let mut reader = Cursor::new(input.as_ref());
         let mut writer = Vec::<u8>::new();
 
@@ -455,14 +559,213 @@ mod tests {
         assert!(!saved.contains("\"old\""), "old values should be overwritten");
     }
 
-    #[test]
-    fn mask_credential_masks_long_values() {
-        assert_eq!(mask_credential("abcdefghijklmnop"), "abcdef…mnop");
+    #[tokio::test]
+    async fn init_update_keeps_fields_when_enter_pressed() {
+        let dir = TempDir::new().unwrap();
+        let path = fake_path(&dir);
+        std::fs::write(
+            &path,
+            "[default]\naccount_id = \"keep-acct\"\nclient_id = \"keep-cid\"\nclient_secret = \"keep-csec\"\n",
+        )
+        .unwrap();
+
+        // \n accepts "update" default at action prompt; subsequent \n's keep
+        // each current credential value unchanged.
+        let input = b"\n\n\n\n";
+        let mut reader = Cursor::new(input.as_ref());
+        let mut writer = Vec::<u8>::new();
+
+        run_init(
+            &mut reader,
+            &mut writer,
+            &path,
+            None,
+            |a, b, c| async move {
+                let _ = (a, b, c);
+                Some("Alice".into())
+            },
+        )
+        .await
+        .unwrap();
+
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("keep-acct"), "kept account_id");
+        assert!(saved.contains("keep-cid"), "kept client_id");
+        assert!(saved.contains("keep-csec"), "kept client_secret");
     }
 
-    #[test]
-    fn mask_credential_dots_short_values() {
-        assert_eq!(mask_credential("short"), "•••••");
-        assert_eq!(mask_credential(""), "");
+    #[tokio::test]
+    async fn init_update_does_not_show_oauth_instructions() {
+        let dir = TempDir::new().unwrap();
+        let path = fake_path(&dir);
+        std::fs::write(
+            &path,
+            "[default]\naccount_id = \"acct\"\nclient_id = \"cid\"\nclient_secret = \"csec\"\n",
+        )
+        .unwrap();
+
+        let input = b"\nnew-acct\nnew-cid\nnew-csec\n";
+        let mut reader = Cursor::new(input.as_ref());
+        let mut writer = Vec::<u8>::new();
+
+        run_init(
+            &mut reader,
+            &mut writer,
+            &path,
+            None,
+            |a, b, c| async move {
+                let _ = (a, b, c);
+                Some("Alice".into())
+            },
+        )
+        .await
+        .unwrap();
+
+        let output = String::from_utf8_lossy(&writer);
+        assert!(
+            !output.contains("marketplace.zoom.us/develop/create"),
+            "update mode must not show OAuth setup instructions"
+        );
+        assert!(output.contains("Profile:"), "should list the existing profile");
+        assert!(output.contains("Action"), "should show the action prompt");
+        assert!(output.contains("Enter to keep"), "credential prompts should show keep hint");
+    }
+
+    #[tokio::test]
+    async fn init_adds_new_profile_to_existing_config() {
+        let dir = TempDir::new().unwrap();
+        let path = fake_path(&dir);
+        std::fs::write(
+            &path,
+            "[default]\naccount_id = \"def-acct\"\nclient_id = \"def-cid\"\nclient_secret = \"def-csec\"\n",
+        )
+        .unwrap();
+
+        // --profile work (not existing): goes straight to credentials (new profile flow).
+        let input = b"work-acct\nwork-cid\nwork-csec\n";
+        let mut reader = Cursor::new(input.as_ref());
+        let mut writer = Vec::<u8>::new();
+
+        run_init(
+            &mut reader,
+            &mut writer,
+            &path,
+            Some("work"),
+            |a, b, c| async move {
+                let _ = (a, b, c);
+                Some("Bob".into())
+            },
+        )
+        .await
+        .unwrap();
+
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("[default]"), "default profile preserved");
+        assert!(saved.contains("[work]"), "new profile added");
+        assert!(saved.contains("work-acct"));
+        assert!(saved.contains("def-acct"), "existing credentials untouched");
+
+        let output = String::from_utf8_lossy(&writer);
+        assert!(
+            !output.contains("Press Enter when your app is ready"),
+            "must not show the old wait gate"
+        );
+    }
+
+    #[tokio::test]
+    async fn init_aborts_gracefully_on_eof_during_required_prompt() {
+        let dir = TempDir::new().unwrap();
+        let path = fake_path(&dir);
+
+        // First setup: EOF immediately on the Account ID prompt.
+        let input = b"";
+        let mut reader = Cursor::new(input.as_ref());
+        let mut writer = Vec::<u8>::new();
+
+        run_init(
+            &mut reader,
+            &mut writer,
+            &path,
+            None,
+            |a, b, c| async move {
+                let _ = (a, b, c);
+                Some("Unreachable".into())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(!path.exists(), "config must not be written on aborted input");
+        let output = String::from_utf8_lossy(&writer);
+        assert!(output.contains("Aborted"), "should print an abort message");
+    }
+
+    #[tokio::test]
+    async fn init_outro_includes_profile_flag_for_non_default_profiles() {
+        let dir = TempDir::new().unwrap();
+        let path = fake_path(&dir);
+
+        let input = b"work-acct\nwork-cid\nwork-csec\n";
+        let mut reader = Cursor::new(input.as_ref());
+        let mut writer = Vec::<u8>::new();
+
+        run_init(
+            &mut reader,
+            &mut writer,
+            &path,
+            Some("work"),
+            |a, b, c| async move {
+                let _ = (a, b, c);
+                Some("Bob".into())
+            },
+        )
+        .await
+        .unwrap();
+
+        let output = String::from_utf8_lossy(&writer);
+        assert!(
+            output.contains("--profile work"),
+            "outro should include --profile flag for non-default profiles"
+        );
+    }
+
+    #[tokio::test]
+    async fn init_action_add_prompts_for_new_profile_name() {
+        let dir = TempDir::new().unwrap();
+        let path = fake_path(&dir);
+        std::fs::write(
+            &path,
+            "[default]\naccount_id = \"def-acct\"\nclient_id = \"def-cid\"\nclient_secret = \"def-csec\"\n",
+        )
+        .unwrap();
+
+        // Choose "add" action, then supply a profile name and credentials.
+        let input = b"add\nstaging\nstg-acct\nstg-cid\nstg-csec\n";
+        let mut reader = Cursor::new(input.as_ref());
+        let mut writer = Vec::<u8>::new();
+
+        run_init(
+            &mut reader,
+            &mut writer,
+            &path,
+            None,
+            |a, b, c| async move {
+                let _ = (a, b, c);
+                Some("Carol".into())
+            },
+        )
+        .await
+        .unwrap();
+
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("[default]"), "default profile preserved");
+        assert!(saved.contains("[staging]"), "new profile added");
+        assert!(saved.contains("stg-acct"));
+
+        let output = String::from_utf8_lossy(&writer);
+        assert!(
+            output.contains(OAUTH_URL),
+            "add flow should show OAuth URL"
+        );
     }
 }
