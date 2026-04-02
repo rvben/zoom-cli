@@ -134,6 +134,19 @@ async fn main() {
     let cli = Cli::parse();
     let out = OutputConfig::new(cli.json, cli.quiet);
 
+    // Schema and completions do not require credentials.
+    match &cli.command {
+        Command::Schema { resource } => {
+            commands::schema(resource, &out);
+            return;
+        }
+        Command::Completions { shell } => {
+            clap_complete::generate(*shell, &mut Cli::command(), "zoom", &mut std::io::stdout());
+            return;
+        }
+        _ => {}
+    }
+
     let cfg = match Config::load(cli.profile) {
         Ok(c) => c,
         Err(e) => {
@@ -182,14 +195,7 @@ async fn main() {
             }
             UsersCommand::Me => commands::users::me(&mut client, &out).await,
         },
-        Command::Schema { resource } => {
-            commands::schema(&resource, &out);
-            return;
-        }
-        Command::Completions { shell } => {
-            clap_complete::generate(shell, &mut Cli::command(), "zoom", &mut std::io::stdout());
-            return;
-        }
+        Command::Schema { .. } | Command::Completions { .. } => unreachable!(),
     };
 
     if let Err(e) = result {
