@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn users_list_returns_ok_with_data() {
+    async fn users_list_json_includes_total_records() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/v2/users"))
