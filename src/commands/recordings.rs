@@ -28,7 +28,7 @@ pub async fn list(
             .iter()
             .map(|r| {
                 vec![
-                    r.id.clone(),
+                    r.id.to_string(),
                     r.topic.clone(),
                     r.start_time.clone(),
                     r.duration
@@ -63,7 +63,7 @@ pub async fn get(
         out.print_data(&serde_json::to_string_pretty(&recording).expect("serialize"));
     } else {
         out.print_data(&output::kv_block(&[
-            ("id", recording.id.clone()),
+            ("id", recording.id.to_string()),
             ("topic", recording.topic.clone()),
             ("start_time", recording.start_time.clone()),
             (
@@ -225,7 +225,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/v2/meetings/abc123/recordings"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "id": "abc123",
+                "id": 123456789,
                 "topic": "Design Review",
                 "start_time": "2026-04-01T10:00:00Z",
                 "duration": 45,

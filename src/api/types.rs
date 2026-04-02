@@ -79,7 +79,7 @@ pub struct UserList {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CloudRecording {
-    pub id: String,
+    pub id: u64,
     pub topic: String,
     pub start_time: String,
     pub duration: Option<u32>,
