@@ -4,6 +4,17 @@ fn is_none_or_empty(s: &Option<String>) -> bool {
     s.as_deref().map_or(true, str::is_empty)
 }
 
+// ── Pagination ────────────────────────────────────────────────────────────────
+
+/// Implemented by every paginated list type so `ZoomClient::get_all_pages` can
+/// collect results across multiple API requests transparently.
+pub trait Paginated: Sized {
+    /// Returns the token for the next page, or `None` / empty when exhausted.
+    fn next_page_token(&self) -> Option<&str>;
+    /// Merge `next` page's items into `self`, discarding `next`'s metadata.
+    fn append_page(&mut self, next: Self);
+}
+
 // ── Meeting ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -240,6 +251,68 @@ pub struct UserMeetingReportList {
     pub page_size: Option<u32>,
 }
 
+// ── Paginated impls ───────────────────────────────────────────────────────────
+
+impl Paginated for MeetingList {
+    fn next_page_token(&self) -> Option<&str> {
+        self.next_page_token.as_deref().filter(|s| !s.is_empty())
+    }
+
+    fn append_page(&mut self, next: Self) {
+        self.meetings.extend(next.meetings);
+        // Normalize empty string to None — empty token means no more pages.
+        self.next_page_token = next.next_page_token.filter(|t| !t.is_empty());
+    }
+}
+
+impl Paginated for UserList {
+    fn next_page_token(&self) -> Option<&str> {
+        self.next_page_token.as_deref().filter(|s| !s.is_empty())
+    }
+
+    fn append_page(&mut self, next: Self) {
+        self.users.extend(next.users);
+        self.next_page_token = next.next_page_token.filter(|t| !t.is_empty());
+    }
+}
+
+impl Paginated for RecordingList {
+    fn next_page_token(&self) -> Option<&str> {
+        self.next_page_token.as_deref().filter(|s| !s.is_empty())
+    }
+
+    fn append_page(&mut self, next: Self) {
+        match (self.recordings.as_mut(), next.recordings) {
+            (Some(dst), Some(src)) => dst.extend(src),
+            (None, Some(src)) => self.recordings = Some(src),
+            _ => {}
+        }
+        self.next_page_token = next.next_page_token.filter(|t| !t.is_empty());
+    }
+}
+
+impl Paginated for ParticipantList {
+    fn next_page_token(&self) -> Option<&str> {
+        self.next_page_token.as_deref().filter(|s| !s.is_empty())
+    }
+
+    fn append_page(&mut self, next: Self) {
+        self.participants.extend(next.participants);
+        self.next_page_token = next.next_page_token.filter(|t| !t.is_empty());
+    }
+}
+
+impl Paginated for UserMeetingReportList {
+    fn next_page_token(&self) -> Option<&str> {
+        self.next_page_token.as_deref().filter(|s| !s.is_empty())
+    }
+
+    fn append_page(&mut self, next: Self) {
+        self.meetings.extend(next.meetings);
+        self.next_page_token = next.next_page_token.filter(|t| !t.is_empty());
+    }
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -470,6 +543,87 @@ mod tests {
         let v: serde_json::Value = serde_json::to_value(&list).unwrap();
         assert!(v.get("page_size").is_none());
         assert!(v.get("next_page_token").is_none());
+    }
+
+    #[test]
+    fn meeting_list_paginated_append_merges_items() {
+        let mut first = MeetingList {
+            meetings: vec![Meeting {
+                id: 1,
+                topic: "First".into(),
+                start_time: None,
+                duration: None,
+                join_url: None,
+                start_url: None,
+                status: None,
+                created_at: None,
+                password: None,
+                meeting_type: None,
+            }],
+            next_page_token: Some("tok".into()),
+            total_records: Some(2),
+            page_count: None,
+            page_size: None,
+        };
+        let second = MeetingList {
+            meetings: vec![Meeting {
+                id: 2,
+                topic: "Second".into(),
+                start_time: None,
+                duration: None,
+                join_url: None,
+                start_url: None,
+                status: None,
+                created_at: None,
+                password: None,
+                meeting_type: None,
+            }],
+            next_page_token: Some("".into()),
+            total_records: Some(2),
+            page_count: None,
+            page_size: None,
+        };
+        first.append_page(second);
+        assert_eq!(first.meetings.len(), 2);
+        assert_eq!(first.next_page_token(), None, "empty token is exhausted");
+        assert_eq!(first.total_records, Some(2), "total_records preserved from first page");
+    }
+
+    #[test]
+    fn recording_list_paginated_append_merges_option_vec() {
+        let mut first = RecordingList {
+            recordings: Some(vec![CloudRecording {
+                id: 1,
+                topic: "Rec 1".into(),
+                start_time: "2026-01-01T10:00:00Z".into(),
+                duration: None,
+                total_size: None,
+                recording_count: None,
+                recording_files: None,
+            }]),
+            next_page_token: Some("t".into()),
+            total_records: Some(2),
+            from: None,
+            to: None,
+        };
+        let second = RecordingList {
+            recordings: Some(vec![CloudRecording {
+                id: 2,
+                topic: "Rec 2".into(),
+                start_time: "2026-01-02T10:00:00Z".into(),
+                duration: None,
+                total_size: None,
+                recording_count: None,
+                recording_files: None,
+            }]),
+            next_page_token: None,
+            total_records: Some(2),
+            from: None,
+            to: None,
+        };
+        first.append_page(second);
+        assert_eq!(first.recordings.as_ref().unwrap().len(), 2);
+        assert_eq!(first.next_page_token(), None);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::ApiError;
-use super::types::*;
+use super::types::{self, *};
 
 const ZOOM_API_BASE: &str = "https://api.zoom.us/v2";
 const ZOOM_OAUTH_BASE: &str = "https://zoom.us";
@@ -99,6 +99,25 @@ impl ZoomClient {
         let token = self.ensure_token().await?.to_owned();
         let resp = self.http.get(&url).bearer_auth(&token).send().await?;
         self.handle_response(resp).await
+    }
+
+    /// Fetches all pages of a paginated endpoint, merging results into one value.
+    async fn get_all_pages<T>(&mut self, path: &str, base_params: &[(&str, &str)]) -> Result<T, ApiError>
+    where
+        T: DeserializeOwned + types::Paginated,
+    {
+        let mut result: T = self.get_with_query(path, base_params).await?;
+        loop {
+            let token = match result.next_page_token() {
+                Some(t) if !t.is_empty() => t.to_owned(),
+                _ => break,
+            };
+            let mut params = base_params.to_vec();
+            params.push(("next_page_token", token.as_str()));
+            let next: T = self.get_with_query(path, &params).await?;
+            result.append_page(next);
+        }
+        Ok(result)
     }
 
     async fn get_with_query<T: DeserializeOwned>(
@@ -225,13 +244,13 @@ impl ZoomClient {
         meeting_type: Option<&str>,
     ) -> Result<MeetingList, ApiError> {
         let path = format!("/users/{user_id}/meetings");
-        let mut params: Vec<(&str, &str)> = vec![("page_size", "100")];
+        let mut params: Vec<(&str, &str)> = vec![("page_size", "300")];
         let mt_owned;
         if let Some(mt) = meeting_type {
             mt_owned = mt.to_owned();
             params.push(("type", mt_owned.as_str()));
         }
-        self.get_with_query(&path, &params).await
+        self.get_all_pages(&path, &params).await
     }
 
     pub async fn get_meeting(&mut self, meeting_id: u64) -> Result<Meeting, ApiError> {
@@ -275,7 +294,7 @@ impl ZoomClient {
             st_owned = st.to_owned();
             params.push(("status", st_owned.as_str()));
         }
-        self.get_with_query("/users", &params).await
+        self.get_all_pages("/users", &params).await
     }
 
     pub async fn get_user(&mut self, user_id: &str) -> Result<User, ApiError> {
@@ -289,7 +308,7 @@ impl ZoomClient {
         meeting_id: &str,
     ) -> Result<ParticipantList, ApiError> {
         let encoded_id = meeting_id.replace('/', "%2F");
-        self.get_with_query(
+        self.get_all_pages(
             &format!("/past_meetings/{encoded_id}/participants"),
             &[("page_size", "300")],
         )
@@ -305,7 +324,7 @@ impl ZoomClient {
         to: Option<&str>,
     ) -> Result<RecordingList, ApiError> {
         let path = format!("/users/{user_id}/recordings");
-        let mut params: Vec<(&str, &str)> = vec![("page_size", "30")];
+        let mut params: Vec<(&str, &str)> = vec![("page_size", "300")];
         let from_owned;
         let to_owned;
         if let Some(f) = from {
@@ -316,7 +335,7 @@ impl ZoomClient {
             to_owned = t.to_owned();
             params.push(("to", to_owned.as_str()));
         }
-        self.get_with_query(&path, &params).await
+        self.get_all_pages(&path, &params).await
     }
 
     /// Control recording state for a live meeting (start/stop/pause/resume).
@@ -405,7 +424,7 @@ impl ZoomClient {
             to_owned = t.to_owned();
             params.push(("to", to_owned.as_str()));
         }
-        self.get_with_query(&format!("/report/users/{user_id}/meetings"), &params)
+        self.get_all_pages(&format!("/report/users/{user_id}/meetings"), &params)
             .await
     }
 }
@@ -635,5 +654,113 @@ mod tests {
         let mut client = mock_client(&server).await;
         let list = client.list_user_meeting_reports("me", "2026-04-01", None).await.unwrap();
         assert_eq!(list.meetings.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn list_meetings_follows_next_page_token() {
+        let server = MockServer::start().await;
+
+        // First page returns a next_page_token.
+        Mock::given(method("GET"))
+            .and(path("/v2/users/me/meetings"))
+            .and(query_param("page_size", "300"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meetings": [{"id": 1, "topic": "Page 1 Meeting"}],
+                "total_records": 2,
+                "next_page_token": "token-abc"
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Second page (identified by next_page_token) returns no further token.
+        Mock::given(method("GET"))
+            .and(path("/v2/users/me/meetings"))
+            .and(query_param("next_page_token", "token-abc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meetings": [{"id": 2, "topic": "Page 2 Meeting"}],
+                "total_records": 2,
+                "next_page_token": ""
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        let list = client.list_meetings("me", None).await.unwrap();
+
+        assert_eq!(list.meetings.len(), 2, "both pages must be merged");
+        assert_eq!(list.meetings[0].topic, "Page 1 Meeting");
+        assert_eq!(list.meetings[1].topic, "Page 2 Meeting");
+        assert!(list.next_page_token.is_none(), "exhausted token must be absent");
+    }
+
+    #[tokio::test]
+    async fn list_users_follows_next_page_token() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/users"))
+            .and(query_param("page_size", "300"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "users": [{"id": "u1", "email": "a@example.com"}],
+                "total_records": 2,
+                "next_page_token": "page2-token"
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/users"))
+            .and(query_param("next_page_token", "page2-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "users": [{"id": "u2", "email": "b@example.com"}],
+                "total_records": 2,
+                "next_page_token": ""
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        let list = client.list_users(None).await.unwrap();
+
+        assert_eq!(list.users.len(), 2, "both pages must be merged");
+        assert_eq!(list.users[0].email, "a@example.com");
+        assert_eq!(list.users[1].email, "b@example.com");
+    }
+
+    #[tokio::test]
+    async fn list_participants_follows_next_page_token() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/past_meetings/mtg123/participants"))
+            .and(query_param("page_size", "300"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "participants": [{"name": "Alice"}],
+                "total_records": 2,
+                "next_page_token": "p2"
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/past_meetings/mtg123/participants"))
+            .and(query_param("next_page_token", "p2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "participants": [{"name": "Bob"}],
+                "total_records": 2,
+                "next_page_token": ""
+            })))
+            .mount(&server)
+            .await;
+
+        let mut client = mock_client(&server).await;
+        let list = client.list_past_meeting_participants("mtg123").await.unwrap();
+
+        assert_eq!(list.participants.len(), 2);
+        assert_eq!(list.participants[0].name, Some("Alice".into()));
+        assert_eq!(list.participants[1].name, Some("Bob".into()));
     }
 }
