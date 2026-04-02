@@ -259,20 +259,38 @@ mod tests {
 
     #[test]
     fn is_naive_datetime_identifies_naive_strings() {
-        assert!(is_naive_datetime("2026-04-01T09:00:00"), "no timezone = naive");
-        assert!(is_naive_datetime("2026-04-01T09:00:00.000"), "fractional seconds, no tz = naive");
+        assert!(
+            is_naive_datetime("2026-04-01T09:00:00"),
+            "no timezone = naive"
+        );
+        assert!(
+            is_naive_datetime("2026-04-01T09:00:00.000"),
+            "fractional seconds, no tz = naive"
+        );
     }
 
     #[test]
     fn is_naive_datetime_accepts_tz_aware_strings() {
-        assert!(!is_naive_datetime("2026-04-01T09:00:00Z"), "Z suffix = tz-aware");
-        assert!(!is_naive_datetime("2026-04-01T09:00:00+05:30"), "positive offset = tz-aware");
-        assert!(!is_naive_datetime("2026-04-01T09:00:00-05:00"), "negative offset = tz-aware");
+        assert!(
+            !is_naive_datetime("2026-04-01T09:00:00Z"),
+            "Z suffix = tz-aware"
+        );
+        assert!(
+            !is_naive_datetime("2026-04-01T09:00:00+05:30"),
+            "positive offset = tz-aware"
+        );
+        assert!(
+            !is_naive_datetime("2026-04-01T09:00:00-05:00"),
+            "negative offset = tz-aware"
+        );
     }
 
     #[test]
     fn is_naive_datetime_returns_false_for_date_only() {
-        assert!(!is_naive_datetime("2026-04-01"), "date-only has no time component");
+        assert!(
+            !is_naive_datetime("2026-04-01"),
+            "date-only has no time component"
+        );
         assert!(!is_naive_datetime(""), "empty string");
     }
 
@@ -406,6 +424,8 @@ mod tests {
             .await;
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        participants(&mut client, &test_out(), "abc123").await.unwrap();
+        participants(&mut client, &test_out(), "abc123")
+            .await
+            .unwrap();
     }
 }

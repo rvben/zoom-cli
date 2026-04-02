@@ -166,7 +166,11 @@ impl ZoomClient {
     }
 
     /// Fetches all pages of a paginated endpoint, merging results into one value.
-    async fn get_all_pages<T>(&mut self, path: &str, base_params: &[(&str, &str)]) -> Result<T, ApiError>
+    async fn get_all_pages<T>(
+        &mut self,
+        path: &str,
+        base_params: &[(&str, &str)],
+    ) -> Result<T, ApiError>
     where
         T: DeserializeOwned + types::Paginated,
     {
@@ -325,7 +329,9 @@ impl ZoomClient {
     pub async fn end_meeting(&mut self, meeting_id: u64) -> Result<(), ApiError> {
         self.put(
             &format!("/meetings/{meeting_id}/status"),
-            &MeetingStatusRequest { action: "end".into() },
+            &MeetingStatusRequest {
+                action: "end".into(),
+            },
         )
         .await
     }
@@ -387,7 +393,11 @@ impl ZoomClient {
     ///
     /// `trash`: when `true`, moves files to the trash (recoverable for 30 days);
     /// when `false`, permanently deletes them immediately.
-    pub async fn delete_recording(&mut self, meeting_id: &str, trash: bool) -> Result<(), ApiError> {
+    pub async fn delete_recording(
+        &mut self,
+        meeting_id: &str,
+        trash: bool,
+    ) -> Result<(), ApiError> {
         let encoded_id = encode_meeting_id(meeting_id);
         let action = if trash { "trash" } else { "delete" };
         self.delete_with_query(
@@ -473,9 +483,9 @@ impl ZoomClient {
 
         match write_result {
             Ok(bytes) => {
-                tokio::fs::rename(&tmp_path, dest_path).await.map_err(|e| {
-                    ApiError::Other(format!("Cannot finalize download: {e}"))
-                })?;
+                tokio::fs::rename(&tmp_path, dest_path)
+                    .await
+                    .map_err(|e| ApiError::Other(format!("Cannot finalize download: {e}")))?;
                 Ok(bytes)
             }
             Err(e) => {
@@ -689,9 +699,7 @@ mod tests {
         // First request: 429 with Retry-After: 0 (instant retry in tests).
         Mock::given(method("GET"))
             .and(path("/v2/users/me/meetings"))
-            .respond_with(
-                ResponseTemplate::new(429).insert_header("retry-after", "0"),
-            )
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
             .up_to_n_times(1)
             .mount(&server)
             .await;
@@ -759,9 +767,7 @@ mod tests {
         // All requests return 429 — retries exhausted.
         Mock::given(method("GET"))
             .and(path("/v2/users/me/meetings"))
-            .respond_with(
-                ResponseTemplate::new(429).insert_header("retry-after", "0"),
-            )
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
             .mount(&server)
             .await;
 
@@ -817,9 +823,7 @@ mod tests {
         // Return 429 with a Retry-After header once, then 200.
         Mock::given(method("GET"))
             .and(path("/v2/users"))
-            .respond_with(
-                ResponseTemplate::new(429).insert_header("retry-after", "0"),
-            )
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
             .up_to_n_times(1)
             .mount(&server)
             .await;
@@ -888,7 +892,10 @@ mod tests {
             .mount(&server)
             .await;
         let mut client = mock_client(&server).await;
-        let list = client.list_past_meeting_participants("abc123").await.unwrap();
+        let list = client
+            .list_past_meeting_participants("abc123")
+            .await
+            .unwrap();
         assert_eq!(list.participants.len(), 1);
         assert_eq!(list.participants[0].name, Some("Alice".into()));
     }
@@ -908,7 +915,10 @@ mod tests {
             .mount(&server)
             .await;
         let mut client = mock_client(&server).await;
-        let list = client.list_user_meeting_reports("me", "2026-04-01", None).await.unwrap();
+        let list = client
+            .list_user_meeting_reports("me", "2026-04-01", None)
+            .await
+            .unwrap();
         assert_eq!(list.meetings.len(), 0);
     }
 
@@ -947,7 +957,10 @@ mod tests {
         assert_eq!(list.meetings.len(), 2, "both pages must be merged");
         assert_eq!(list.meetings[0].topic, "Page 1 Meeting");
         assert_eq!(list.meetings[1].topic, "Page 2 Meeting");
-        assert!(list.next_page_token.is_none(), "exhausted token must be absent");
+        assert!(
+            list.next_page_token.is_none(),
+            "exhausted token must be absent"
+        );
     }
 
     #[test]
@@ -967,7 +980,10 @@ mod tests {
     #[test]
     fn encode_meeting_id_double_encodes_double_slash() {
         assert_eq!(encode_meeting_id("abc//def"), "abc%252F%252Fdef");
-        assert_eq!(encode_meeting_id("4444AAAiAAAAAiAA//AA=="), "4444AAAiAAAAAiAA%252F%252FAA==");
+        assert_eq!(
+            encode_meeting_id("4444AAAiAAAAAiAA//AA=="),
+            "4444AAAiAAAAAiAA%252F%252FAA=="
+        );
     }
 
     #[tokio::test]
@@ -1054,7 +1070,10 @@ mod tests {
             .await;
 
         let mut client = mock_client(&server).await;
-        let list = client.list_past_meeting_participants("mtg123").await.unwrap();
+        let list = client
+            .list_past_meeting_participants("mtg123")
+            .await
+            .unwrap();
 
         assert_eq!(list.participants.len(), 2);
         assert_eq!(list.participants[0].name, Some("Alice".into()));

@@ -53,7 +53,8 @@ impl Config {
             .or_else(|| normalize(file_profile.client_secret))
             .ok_or_else(|| {
                 ApiError::InvalidInput(
-                    "No client_secret configured. Run 'zoom init' or set ZOOM_CLIENT_SECRET.".into(),
+                    "No client_secret configured. Run 'zoom init' or set ZOOM_CLIENT_SECRET."
+                        .into(),
                 )
             })?;
 
@@ -106,7 +107,13 @@ pub fn load_for_show(profile_arg: Option<&str>) -> ConfigSummary {
         }
     }
 
-    ConfigSummary { config_file: path, file_exists, active_profile, profiles, env_overrides }
+    ConfigSummary {
+        config_file: path,
+        file_exists,
+        active_profile,
+        profiles,
+        env_overrides,
+    }
 }
 
 /// Read the raw credential values for a specific profile, for use when updating.
@@ -126,7 +133,11 @@ pub fn read_profile_credentials(
         raw.profiles.get(profile_name)?.clone()
     };
 
-    Some((normalize(p.account_id)?, normalize(p.client_id)?, normalize(p.client_secret)?))
+    Some((
+        normalize(p.account_id)?,
+        normalize(p.client_id)?,
+        normalize(p.client_secret)?,
+    ))
 }
 
 fn read_all_profiles(path: &Path) -> Vec<ProfileSummary> {
@@ -259,9 +270,18 @@ pub fn write_profile(
     };
 
     let mut profile = toml::Table::new();
-    profile.insert("account_id".into(), toml::Value::String(account_id.to_owned()));
-    profile.insert("client_id".into(), toml::Value::String(client_id.to_owned()));
-    profile.insert("client_secret".into(), toml::Value::String(client_secret.to_owned()));
+    profile.insert(
+        "account_id".into(),
+        toml::Value::String(account_id.to_owned()),
+    );
+    profile.insert(
+        "client_id".into(),
+        toml::Value::String(client_id.to_owned()),
+    );
+    profile.insert(
+        "client_secret".into(),
+        toml::Value::String(client_secret.to_owned()),
+    );
     table.insert(profile_name.to_owned(), toml::Value::Table(profile));
 
     if let Some(parent) = path.parent() {

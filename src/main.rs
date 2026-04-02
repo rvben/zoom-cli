@@ -307,9 +307,10 @@ async fn main() {
             RecordingsCommand::Resume { meeting_id } => {
                 commands::recordings::control(&mut client, &out, meeting_id, "resume").await
             }
-            RecordingsCommand::Delete { meeting_id, permanent } => {
-                commands::recordings::delete(&mut client, &out, &meeting_id, !permanent).await
-            }
+            RecordingsCommand::Delete {
+                meeting_id,
+                permanent,
+            } => commands::recordings::delete(&mut client, &out, &meeting_id, !permanent).await,
         },
         Command::Users(cmd) => match cmd {
             UsersCommand::List { status } => {
@@ -331,7 +332,10 @@ async fn main() {
             }
             WebinarsCommand::Get { id } => commands::webinars::get(&mut client, &out, id).await,
         },
-        Command::Config(_) | Command::Init { .. } | Command::Schema { .. } | Command::Completions { .. } => {
+        Command::Config(_)
+        | Command::Init { .. }
+        | Command::Schema { .. }
+        | Command::Completions { .. } => {
             unreachable!()
         }
     };

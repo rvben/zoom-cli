@@ -59,7 +59,10 @@ pub async fn get(
         out.print_data(&output::kv_block(&[
             ("id", recording.id.to_string()),
             ("topic", recording.topic.clone()),
-            ("start_time", output::format_timestamp(&recording.start_time)),
+            (
+                "start_time",
+                output::format_timestamp(&recording.start_time),
+            ),
             (
                 "duration",
                 recording
@@ -157,7 +160,13 @@ pub async fn download(
             .as_deref()
             .unwrap_or(file_type)
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
             .collect();
         let filename = format!(
             "{}_{}_{}.{}",
@@ -189,7 +198,11 @@ pub async fn delete(
     trash: bool,
 ) -> Result<(), ApiError> {
     client.delete_recording(meeting_id, trash).await?;
-    let disposition = if trash { "moved to trash" } else { "permanently deleted" };
+    let disposition = if trash {
+        "moved to trash"
+    } else {
+        "permanently deleted"
+    };
     out.print_result(
         &serde_json::json!({"deleted": true, "meeting_id": meeting_id, "trash": trash}),
         &format!("Recordings for meeting {meeting_id} {disposition}."),
@@ -319,7 +332,9 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        delete(&mut client, &test_out(), "abc123", true).await.unwrap();
+        delete(&mut client, &test_out(), "abc123", true)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -333,7 +348,9 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        delete(&mut client, &test_out(), "abc123", false).await.unwrap();
+        delete(&mut client, &test_out(), "abc123", false)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -347,7 +364,9 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        let err = delete(&mut client, &test_out(), "nope", true).await.unwrap_err();
+        let err = delete(&mut client, &test_out(), "nope", true)
+            .await
+            .unwrap_err();
         assert!(matches!(err, ApiError::NotFound(_)));
     }
 

@@ -56,7 +56,11 @@ fn prompt_optional<R: BufRead, W: Write>(
     let mut input = String::new();
     reader.read_line(&mut input).unwrap_or(0);
     let trimmed = input.trim().to_owned();
-    if trimmed.is_empty() { default.to_owned() } else { trimmed }
+    if trimmed.is_empty() {
+        default.to_owned()
+    } else {
+        trimmed
+    }
 }
 
 /// Prompt for a required field, looping until a non-empty value is entered.
@@ -68,7 +72,13 @@ fn prompt_required<R: BufRead, W: Write>(
     hint: &str,
 ) -> Option<String> {
     loop {
-        let _ = write!(writer, "{} {}  {}: ", sym_q(), label, sym_dim(&format!("[{hint}]")));
+        let _ = write!(
+            writer,
+            "{} {}  {}: ",
+            sym_q(),
+            label,
+            sym_dim(&format!("[{hint}]"))
+        );
         let _ = writer.flush();
 
         let mut input = String::new();
@@ -103,7 +113,11 @@ fn prompt_credential_update<R: BufRead, W: Write>(
         Ok(_) => {}
     }
     let trimmed = input.trim().to_owned();
-    Some(if trimmed.is_empty() { current.to_owned() } else { trimmed })
+    Some(if trimmed.is_empty() {
+        current.to_owned()
+    } else {
+        trimmed
+    })
 }
 
 fn prompt_confirm<R: BufRead, W: Write>(
@@ -146,7 +160,10 @@ fn print_json_schema(config_path: &Path) {
             "format": "[default]\naccount_id = \"YOUR_ACCOUNT_ID\"\nclient_id = \"YOUR_CLIENT_ID\"\nclient_secret = \"YOUR_CLIENT_SECRET\""
         }
     });
-    println!("{}", serde_json::to_string_pretty(&schema).expect("serialize"));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&schema).expect("serialize")
+    );
 }
 
 fn load_existing_profile_names(config_path: &Path) -> Vec<String> {
@@ -249,7 +266,11 @@ where
 
     // For new profiles, show where to create the OAuth app — no gate, just context.
     if !is_update {
-        let _ = writeln!(writer, "  {}", sym_dim("Create a Server-to-Server OAuth app at:"));
+        let _ = writeln!(
+            writer,
+            "  {}",
+            sym_dim("Create a Server-to-Server OAuth app at:")
+        );
         let _ = writeln!(writer, "  {}\n", sym_dim(OAUTH_URL));
     }
 
@@ -258,14 +279,12 @@ where
         let (cur_acct, cur_cid, cur_csec) =
             config::read_profile_credentials(config_path, &profile_name)
                 .expect("update mode requires existing credentials");
-        let Some(account_id) =
-            prompt_credential_update(reader, writer, "Account ID", &cur_acct)
+        let Some(account_id) = prompt_credential_update(reader, writer, "Account ID", &cur_acct)
         else {
             let _ = writeln!(writer, "\nAborted.");
             return Ok(());
         };
-        let Some(client_id) =
-            prompt_credential_update(reader, writer, "Client ID", &cur_cid)
+        let Some(client_id) = prompt_credential_update(reader, writer, "Client ID", &cur_cid)
         else {
             let _ = writeln!(writer, "\nAborted.");
             return Ok(());
@@ -284,8 +303,7 @@ where
             let _ = writeln!(writer, "\nAborted.");
             return Ok(());
         };
-        let Some(client_id) =
-            prompt_required(reader, writer, "Client ID", "from app credentials")
+        let Some(client_id) = prompt_required(reader, writer, "Client ID", "from app credentials")
         else {
             let _ = writeln!(writer, "\nAborted.");
             return Ok(());
@@ -368,8 +386,7 @@ pub async fn init(profile_arg: Option<String>) -> Result<(), ApiError> {
         &config_path,
         profile_arg.as_deref(),
         |account_id, client_id, client_secret| async move {
-            let mut client =
-                crate::api::ZoomClient::new(account_id, client_id, client_secret);
+            let mut client = crate::api::ZoomClient::new(account_id, client_id, client_secret);
             match client.get_user("me").await {
                 Ok(user) => Some(user.display_name.unwrap_or(user.email)),
                 Err(_) => None,
@@ -445,7 +462,10 @@ mod tests {
         .unwrap();
 
         let saved = std::fs::read_to_string(&path).unwrap();
-        assert!(saved.contains("[default]"), "should use 'default' profile name");
+        assert!(
+            saved.contains("[default]"),
+            "should use 'default' profile name"
+        );
     }
 
     #[tokio::test]
@@ -522,7 +542,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(path.exists(), "config should be saved when user chooses to save anyway");
+        assert!(
+            path.exists(),
+            "config should be saved when user chooses to save anyway"
+        );
     }
 
     #[tokio::test]
@@ -556,7 +579,10 @@ mod tests {
 
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(saved.contains("new-account"));
-        assert!(!saved.contains("\"old\""), "old values should be overwritten");
+        assert!(
+            !saved.contains("\"old\""),
+            "old values should be overwritten"
+        );
     }
 
     #[tokio::test]
@@ -626,9 +652,15 @@ mod tests {
             !output.contains("marketplace.zoom.us/develop/create"),
             "update mode must not show OAuth setup instructions"
         );
-        assert!(output.contains("Profile:"), "should list the existing profile");
+        assert!(
+            output.contains("Profile:"),
+            "should list the existing profile"
+        );
         assert!(output.contains("Action"), "should show the action prompt");
-        assert!(output.contains("Enter to keep"), "credential prompts should show keep hint");
+        assert!(
+            output.contains("Enter to keep"),
+            "credential prompts should show keep hint"
+        );
     }
 
     #[tokio::test]
@@ -695,7 +727,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(!path.exists(), "config must not be written on aborted input");
+        assert!(
+            !path.exists(),
+            "config must not be written on aborted input"
+        );
         let output = String::from_utf8_lossy(&writer);
         assert!(output.contains("Aborted"), "should print an abort message");
     }
@@ -763,9 +798,6 @@ mod tests {
         assert!(saved.contains("stg-acct"));
 
         let output = String::from_utf8_lossy(&writer);
-        assert!(
-            output.contains(OAUTH_URL),
-            "add flow should show OAuth URL"
-        );
+        assert!(output.contains(OAUTH_URL), "add flow should show OAuth URL");
     }
 }

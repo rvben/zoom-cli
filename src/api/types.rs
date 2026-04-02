@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 fn is_none_or_empty(s: &Option<String>) -> bool {
-    s.as_deref().map_or(true, str::is_empty)
+    s.as_deref().is_none_or(str::is_empty)
 }
 
 // ── Pagination ────────────────────────────────────────────────────────────────
@@ -435,9 +435,18 @@ mod tests {
             page_size: Some(100),
         };
         let v: serde_json::Value = serde_json::to_value(&list).unwrap();
-        assert!(v.get("page_count").is_none(), "page internals must be hidden");
-        assert!(v.get("page_size").is_none(), "page internals must be hidden");
-        assert!(v.get("next_page_token").is_none(), "empty token must be omitted");
+        assert!(
+            v.get("page_count").is_none(),
+            "page internals must be hidden"
+        );
+        assert!(
+            v.get("page_size").is_none(),
+            "page internals must be hidden"
+        );
+        assert!(
+            v.get("next_page_token").is_none(),
+            "empty token must be omitted"
+        );
         assert_eq!(v["total_records"], 0);
     }
 
@@ -520,9 +529,15 @@ mod tests {
             to: Some("2026-04-01".into()),
         };
         let v: serde_json::Value = serde_json::to_value(&list).unwrap();
-        assert!(v.get("meetings").is_none(), "must serialize as 'recordings', not 'meetings'");
+        assert!(
+            v.get("meetings").is_none(),
+            "must serialize as 'recordings', not 'meetings'"
+        );
         assert!(v.get("recordings").is_some());
-        assert!(v.get("next_page_token").is_none(), "empty token must be omitted");
+        assert!(
+            v.get("next_page_token").is_none(),
+            "empty token must be omitted"
+        );
     }
 
     #[test]
@@ -628,7 +643,11 @@ mod tests {
         first.append_page(second);
         assert_eq!(first.meetings.len(), 2);
         assert_eq!(first.next_page_token(), None, "empty token is exhausted");
-        assert_eq!(first.total_records, Some(2), "total_records preserved from first page");
+        assert_eq!(
+            first.total_records,
+            Some(2),
+            "total_records preserved from first page"
+        );
     }
 
     #[test]

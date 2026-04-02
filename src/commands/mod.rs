@@ -181,7 +181,9 @@ pub fn schema(resource: &str, out: &OutputConfig) {
             }
         }),
         _ => {
-            eprintln!("Unknown resource '{resource}'. Available: meetings, recordings, reports, users, webinars");
+            eprintln!(
+                "Unknown resource '{resource}'. Available: meetings, recordings, reports, users, webinars"
+            );
             std::process::exit(1);
         }
     };

@@ -23,7 +23,12 @@ pub fn show(profile_arg: Option<&str>, out: &OutputConfig) {
         let env_overrides_json: serde_json::Map<String, serde_json::Value> = summary
             .env_overrides
             .iter()
-            .map(|(k, v)| (k.to_string(), serde_json::Value::String(output::mask_credential(v))))
+            .map(|(k, v)| {
+                (
+                    k.to_string(),
+                    serde_json::Value::String(output::mask_credential(v)),
+                )
+            })
             .collect();
 
         out.print_data(
@@ -40,7 +45,11 @@ pub fn show(profile_arg: Option<&str>, out: &OutputConfig) {
         out.print_data(&format!(
             "Config file: {}{}",
             summary.config_file.display(),
-            if summary.file_exists { "" } else { "  (not found)" },
+            if summary.file_exists {
+                ""
+            } else {
+                "  (not found)"
+            },
         ));
 
         if summary.profiles.is_empty() && summary.env_overrides.is_empty() {
@@ -49,8 +58,11 @@ pub fn show(profile_arg: Option<&str>, out: &OutputConfig) {
         }
 
         for profile in &summary.profiles {
-            let active_marker =
-                if profile.name == summary.active_profile { "  (active)" } else { "" };
+            let active_marker = if profile.name == summary.active_profile {
+                "  (active)"
+            } else {
+                ""
+            };
             out.print_data(&format!("\nProfile: {}{}", profile.name, active_marker));
             out.print_data(&format!(
                 "  account_id:    {}",
@@ -218,7 +230,10 @@ client_secret = "work-csec"
 
     #[test]
     fn masked_or_unset_masks_present_values() {
-        assert_eq!(masked_or_unset(&Some("abcdefghijklmnop".to_owned())), "abcdef…mnop");
+        assert_eq!(
+            masked_or_unset(&Some("abcdefghijklmnop".to_owned())),
+            "abcdef…mnop"
+        );
         assert_eq!(masked_or_unset(&None), "(not set)");
     }
 }

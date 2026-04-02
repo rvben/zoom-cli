@@ -1,11 +1,7 @@
 use crate::api::{ApiError, ZoomClient};
 use crate::output::{self, OutputConfig};
 
-pub async fn list(
-    client: &mut ZoomClient,
-    out: &OutputConfig,
-    user: &str,
-) -> Result<(), ApiError> {
+pub async fn list(client: &mut ZoomClient, out: &OutputConfig, user: &str) -> Result<(), ApiError> {
     let result = client.list_webinars(user).await?;
 
     if out.json {
