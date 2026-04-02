@@ -89,6 +89,18 @@ pub fn format_timestamp(ts: &str) -> String {
     ts.to_string()
 }
 
+/// Mask a credential string for safe display.
+///
+/// Keeps the first 6 and last 4 characters for long values so users can
+/// verify which credential is in use without exposing the full secret.
+/// Short values (≤ 10 chars) are fully obscured.
+pub fn mask_credential(s: &str) -> String {
+    if s.len() <= 10 {
+        return "•".repeat(s.len());
+    }
+    format!("{}…{}", &s[..6], &s[s.len() - 4..])
+}
+
 /// Render a simple two-column key/value block for single-resource output.
 pub fn kv_block(pairs: &[(&str, String)]) -> String {
     let max_key = pairs.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
@@ -191,6 +203,17 @@ mod tests {
     fn format_timestamp_passes_through_non_timestamps() {
         assert_eq!(format_timestamp("-"), "-");
         assert_eq!(format_timestamp(""), "");
+    }
+
+    #[test]
+    fn mask_credential_masks_long_values() {
+        assert_eq!(mask_credential("abcdefghijklmnop"), "abcdef…mnop");
+    }
+
+    #[test]
+    fn mask_credential_dots_short_values() {
+        assert_eq!(mask_credential("short"), "•••••");
+        assert_eq!(mask_credential(""), "");
     }
 
     #[test]

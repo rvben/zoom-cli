@@ -50,6 +50,10 @@ enum Command {
     #[command(subcommand, arg_required_else_help = true)]
     Webinars(WebinarsCommand),
 
+    /// Manage configuration
+    #[command(subcommand, arg_required_else_help = true)]
+    Config(ConfigCommand),
+
     /// Set up credentials interactively (or print JSON schema for agents)
     Init {
         /// Profile name to create or update (default: "default")
@@ -59,7 +63,7 @@ enum Command {
 
     /// Print schema/field reference for a resource
     Schema {
-        /// Resource name: meetings, recordings, users
+        /// Resource name: meetings, recordings, users, reports, webinars
         resource: String,
     },
 
@@ -68,6 +72,12 @@ enum Command {
         /// Shell to generate completions for
         shell: clap_complete::Shell,
     },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommand {
+    /// Show current configuration: profiles, active profile, and env overrides
+    Show,
 }
 
 #[derive(Subcommand)]
@@ -212,6 +222,10 @@ async fn main() {
 
     // These commands do not require credentials.
     match &cli.command {
+        Command::Config(ConfigCommand::Show) => {
+            commands::config::show(cli.profile.as_deref(), &out);
+            return;
+        }
         Command::Init { profile } => {
             if let Err(e) = commands::init::init(profile.clone()).await {
                 eprintln!("{e}");
@@ -317,7 +331,7 @@ async fn main() {
             }
             WebinarsCommand::Get { id } => commands::webinars::get(&mut client, &out, id).await,
         },
-        Command::Init { .. } | Command::Schema { .. } | Command::Completions { .. } => {
+        Command::Config(_) | Command::Init { .. } | Command::Schema { .. } | Command::Completions { .. } => {
             unreachable!()
         }
     };

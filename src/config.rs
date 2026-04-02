@@ -65,6 +65,108 @@ impl Config {
     }
 }
 
+/// Per-profile credential values as stored in the config file.
+pub struct ProfileSummary {
+    pub name: String,
+    pub account_id: Option<String>,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+}
+
+/// Full configuration state for display — no credential resolution or validation.
+pub struct ConfigSummary {
+    pub config_file: PathBuf,
+    pub file_exists: bool,
+    /// The profile that will be used (from --profile arg, ZOOM_PROFILE, or "default").
+    pub active_profile: String,
+    /// All profiles found in the config file, "default" first.
+    pub profiles: Vec<ProfileSummary>,
+    /// Environment variables that are set and will override file values.
+    /// Each entry is `(var_name, raw_value)`.
+    pub env_overrides: Vec<(&'static str, String)>,
+}
+
+/// Read all config state for display without resolving or validating credentials.
+pub fn load_for_show(profile_arg: Option<&str>) -> ConfigSummary {
+    let path = config_path();
+    let file_exists = path.exists();
+
+    let active_profile = profile_arg
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_owned)
+        .or_else(|| env_var("ZOOM_PROFILE"))
+        .unwrap_or_else(|| "default".to_owned());
+
+    let profiles = read_all_profiles(&path);
+
+    let mut env_overrides = Vec::new();
+    for var in ["ZOOM_ACCOUNT_ID", "ZOOM_CLIENT_ID", "ZOOM_CLIENT_SECRET"] {
+        if let Some(v) = normalize(std::env::var(var).ok()) {
+            env_overrides.push((var, v));
+        }
+    }
+
+    ConfigSummary { config_file: path, file_exists, active_profile, profiles, env_overrides }
+}
+
+/// Read the raw credential values for a specific profile, for use when updating.
+///
+/// Returns `None` if the config file does not exist, cannot be parsed, or does
+/// not contain the requested profile with all three credentials present.
+pub fn read_profile_credentials(
+    path: &Path,
+    profile_name: &str,
+) -> Option<(String, String, String)> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let raw: RawConfig = toml::from_str(&content).ok()?;
+
+    let p = if profile_name == "default" {
+        raw.default
+    } else {
+        raw.profiles.get(profile_name)?.clone()
+    };
+
+    Some((normalize(p.account_id)?, normalize(p.client_id)?, normalize(p.client_secret)?))
+}
+
+fn read_all_profiles(path: &Path) -> Vec<ProfileSummary> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let raw: RawConfig = match toml::from_str(&content) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut profiles = Vec::new();
+
+    // "default" is deserialized into the dedicated field, not the flatten map.
+    if raw.default.account_id.is_some()
+        || raw.default.client_id.is_some()
+        || raw.default.client_secret.is_some()
+    {
+        profiles.push(ProfileSummary {
+            name: "default".to_owned(),
+            account_id: raw.default.account_id,
+            client_id: raw.default.client_id,
+            client_secret: raw.default.client_secret,
+        });
+    }
+
+    // BTreeMap iteration is already in alphabetical order.
+    for (name, p) in raw.profiles {
+        profiles.push(ProfileSummary {
+            name,
+            account_id: p.account_id,
+            client_id: p.client_id,
+            client_secret: p.client_secret,
+        });
+    }
+
+    profiles
+}
+
 pub fn config_path() -> PathBuf {
     config_dir()
         .unwrap_or_else(|| PathBuf::from(".config"))
@@ -169,13 +271,26 @@ pub fn write_profile(
 
     let serialized = toml::to_string_pretty(&table)
         .map_err(|e| ApiError::Other(format!("Failed to serialize config: {e}")))?;
-    std::fs::write(path, serialized)
-        .map_err(|e| ApiError::Other(format!("Failed to write config: {e}")))?;
-
+    // On Unix, create the file with mode 0o600 in a single syscall so there is
+    // no window between creation (with a permissive umask) and chmod.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| ApiError::Other(format!("Failed to write config: {e}")))?;
+        file.write_all(serialized.as_bytes())
+            .map_err(|e| ApiError::Other(format!("Failed to write config: {e}")))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, serialized)
+            .map_err(|e| ApiError::Other(format!("Failed to write config: {e}")))?;
     }
 
     Ok(())

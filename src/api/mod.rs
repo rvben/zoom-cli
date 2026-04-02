@@ -71,6 +71,7 @@ mod tests {
         assert!(msg.contains("Authentication failed"));
         assert!(msg.contains("invalid_token"));
         assert!(msg.contains("credentials"), "should hint at how to fix");
+        assert!(msg.contains("zoom config show"), "should name the command to inspect config");
     }
 
     #[test]
