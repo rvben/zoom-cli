@@ -216,6 +216,8 @@ pub async fn transcript(
             .map_err(|e| ApiError::Other(format!("Cannot create output directory: {e}")))?;
     }
 
+    let mut paths: Vec<String> = Vec::new();
+
     for file in transcript_files {
         let download_url = match &file.download_url {
             Some(u) => u,
@@ -263,8 +265,17 @@ pub async fn transcript(
 
         let bytes = client.download_recording_file(download_url, &dest).await?;
         out.print_message(&format!("  {:.1} MB written", bytes as f64 / 1_048_576.0));
-        out.print_data(&dest.display().to_string());
+        paths.push(dest.display().to_string());
     }
+
+    out.print_result(
+        &serde_json::json!({"files_downloaded": paths.len(), "paths": paths}),
+        &paths
+            .iter()
+            .map(|p| format!("Downloaded: {p}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
 
     Ok(())
 }

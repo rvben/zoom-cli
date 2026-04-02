@@ -96,7 +96,7 @@ pub fn delete(profile_name: &str, force: bool, out: &OutputConfig) {
         if !std::io::stdin().is_terminal() {
             eprintln!();
             eprintln!("Use --force to delete non-interactively.");
-            return;
+            std::process::exit(crate::output::exit_codes::CONFIG_ERROR);
         }
         let mut input = String::new();
         std::io::stdin().lock().read_line(&mut input).unwrap_or(0);
