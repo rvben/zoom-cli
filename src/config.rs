@@ -291,28 +291,7 @@ pub fn write_profile(
 
     let serialized = toml::to_string_pretty(&table)
         .map_err(|e| ApiError::Other(format!("Failed to serialize config: {e}")))?;
-    // On Unix, create the file with mode 0o600 in a single syscall so there is
-    // no window between creation (with a permissive umask) and chmod.
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| ApiError::Other(format!("Failed to write config: {e}")))?;
-        file.write_all(serialized.as_bytes())
-            .map_err(|e| ApiError::Other(format!("Failed to write config: {e}")))?;
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, serialized)
-            .map_err(|e| ApiError::Other(format!("Failed to write config: {e}")))?;
-    }
-
+    write_config_file(path, &serialized)?;
     Ok(())
 }
 
