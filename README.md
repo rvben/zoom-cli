@@ -2,6 +2,7 @@
 [![Crates.io](https://img.shields.io/crates/v/zoom-cli.svg)](https://crates.io/crates/zoom-cli)
 [![PyPI](https://img.shields.io/pypi/v/zoom-cli.svg)](https://pypi.org/project/zoom-cli/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![codecov](https://codecov.io/gh/rvben/zoom-cli/graph/badge.svg)](https://codecov.io/gh/rvben/zoom-cli)
 
 # zoom-cli
 
