@@ -271,7 +271,12 @@ where
             "  {}",
             sym_dim("Create a Server-to-Server OAuth app at:")
         );
-        let _ = writeln!(writer, "  {}\n", sym_dim(OAUTH_URL));
+        let _ = writeln!(
+            writer,
+            "  {}",
+            sym_dim(&format!("{OAUTH_URL} → Server-to-Server OAuth"))
+        );
+        let _ = writeln!(writer);
     }
 
     // Prompt for credentials.
@@ -347,20 +352,39 @@ where
         &client_secret,
     )?;
 
-    let run_cmd = if profile_name == "default" {
-        "zoom users me".to_owned()
+    let pfx = if profile_name == "default" {
+        "zoom".to_owned()
     } else {
-        format!("zoom --profile {} users me", profile_name)
+        format!("zoom --profile {}", profile_name)
     };
 
-    let _ = writeln!(writer, "\n{SEP}");
+    let _ = writeln!(writer);
     let _ = writeln!(
         writer,
-        "  {} Config saved to {}",
+        "  {} Configuration saved to {}",
         sym_ok(),
         sym_dim(&config_path.display().to_string()),
     );
-    let _ = writeln!(writer, "  Run: {}", run_cmd.bold());
+    let _ = writeln!(writer);
+    let _ = writeln!(writer, "  {}:", "Next steps".bold());
+    let _ = writeln!(
+        writer,
+        "    {}",
+        sym_dim(&format!(
+            "{pfx} meetings list      # list upcoming meetings"
+        ))
+    );
+    let _ = writeln!(
+        writer,
+        "    {}",
+        sym_dim(&format!("{pfx} users list          # list users"))
+    );
+    let _ = writeln!(
+        writer,
+        "    {}",
+        sym_dim(&format!("{pfx} completions zsh    # shell completions"))
+    );
+    let _ = writeln!(writer);
     let _ = writer.flush();
 
     Ok(())
