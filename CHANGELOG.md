@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.4](https://github.com/rvben/zoom-cli/compare/v0.2.3...v0.2.4) - 2026-04-03
+
+### Added
+
+- **init**: improve OAuth URL hint and add next steps block ([cd7777d](https://github.com/rvben/zoom-cli/commit/cd7777d42bc8ed582404884438a2ce8d53dbc71c))
+
 ## [0.2.3](https://github.com/rvben/zoom-cli/compare/v0.2.2...v0.2.3) - 2026-04-03
 
 ## [0.2.2](https://github.com/rvben/zoom-cli/compare/v0.2.1...v0.2.2) - 2026-04-03

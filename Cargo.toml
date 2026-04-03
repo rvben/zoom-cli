@@ -1,6 +1,6 @@
 [package]
 name = "zoom-cli"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 rust-version = "1.90"
 description = "Agent-friendly Zoom CLI with JSON output, structured exit codes, and schema introspection"
