@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.5](https://github.com/rvben/zoom-cli/compare/v0.2.4...v0.2.5) - 2026-06-11
+
+### Added
+
+- make zoom CLI fully compliant with The CLI Spec v0.2 (24/24) ([ffedf5f](https://github.com/rvben/zoom-cli/commit/ffedf5f9c814d9e79c943fae64ee6983eb14ea80))
+
 ## [0.2.4](https://github.com/rvben/zoom-cli/compare/v0.2.3...v0.2.4) - 2026-04-03
 
 ### Added
