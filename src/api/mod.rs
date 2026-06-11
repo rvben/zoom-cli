@@ -14,6 +14,10 @@ pub enum ApiError {
     NotFound(String),
     /// Invalid user input or missing config.
     InvalidInput(String),
+    /// Destructive operation that requires explicit confirmation.
+    ConfirmationRequired(String),
+    /// Resource already exists or state conflict (HTTP 409).
+    Conflict(String),
     /// HTTP 429 rate limit.
     RateLimit,
     /// Non-2xx response from the Zoom API.
@@ -33,6 +37,8 @@ impl fmt::Display for ApiError {
             ),
             ApiError::NotFound(msg) => write!(f, "Not found: {msg}"),
             ApiError::InvalidInput(msg) => write!(f, "Invalid input: {msg}"),
+            ApiError::ConfirmationRequired(msg) => write!(f, "{msg}"),
+            ApiError::Conflict(msg) => write!(f, "Conflict: {msg}"),
             ApiError::RateLimit => write!(
                 f,
                 "Rate limited by Zoom (429). Please wait and try again.\nNote: meeting creation is capped at 100 requests/day per user."
@@ -50,6 +56,46 @@ impl std::error::Error for ApiError {
             ApiError::Http(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+impl ApiError {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            ApiError::Auth(_) => "auth_error",
+            ApiError::NotFound(_) => "not_found",
+            ApiError::InvalidInput(_) => "invalid_input",
+            ApiError::ConfirmationRequired(_) => "confirmation_required",
+            ApiError::Conflict(_) => "conflict",
+            ApiError::RateLimit => "rate_limit",
+            ApiError::Api { .. } => "api_error",
+            ApiError::Http(_) => "http_error",
+            ApiError::Other(_) => "error",
+        }
+    }
+
+    pub fn to_structured_json(&self) -> String {
+        let hint: Option<&str> = match self {
+            ApiError::Auth(_) => Some("Run 'zoom init' to set up credentials."),
+            ApiError::RateLimit => Some("Wait and retry."),
+            ApiError::NotFound(_) => Some("Check the ID and try again."),
+            ApiError::ConfirmationRequired(_) => Some("Pass --yes to confirm."),
+            ApiError::Conflict(_) => {
+                Some("The resource already exists or is in a conflicting state.")
+            }
+            _ => None,
+        };
+        let retryable = matches!(self, ApiError::RateLimit | ApiError::Http(_));
+        let message = self.to_string();
+        let mut error_obj = serde_json::json!({
+            "kind": self.kind(),
+            "message": message,
+            "retryable": retryable
+        });
+        if let Some(h) = hint {
+            error_obj["hint"] = serde_json::Value::String(h.to_string());
+        }
+        serde_json::json!({"error": error_obj}).to_string()
     }
 }
 
@@ -152,7 +198,49 @@ mod tests {
         assert!(ApiError::Auth("x".into()).source().is_none());
         assert!(ApiError::NotFound("x".into()).source().is_none());
         assert!(ApiError::InvalidInput("x".into()).source().is_none());
+        assert!(
+            ApiError::ConfirmationRequired("x".into())
+                .source()
+                .is_none()
+        );
+        assert!(ApiError::Conflict("x".into()).source().is_none());
         assert!(ApiError::RateLimit.source().is_none());
         assert!(ApiError::Other("x".into()).source().is_none());
+    }
+
+    #[test]
+    fn kind_returns_correct_strings() {
+        assert_eq!(ApiError::Auth("x".into()).kind(), "auth_error");
+        assert_eq!(ApiError::NotFound("x".into()).kind(), "not_found");
+        assert_eq!(ApiError::InvalidInput("x".into()).kind(), "invalid_input");
+        assert_eq!(
+            ApiError::ConfirmationRequired("x".into()).kind(),
+            "confirmation_required"
+        );
+        assert_eq!(ApiError::Conflict("x".into()).kind(), "conflict");
+        assert_eq!(ApiError::RateLimit.kind(), "rate_limit");
+        assert_eq!(
+            ApiError::Api {
+                status: 400,
+                message: "x".into()
+            }
+            .kind(),
+            "api_error"
+        );
+        assert_eq!(ApiError::Other("x".into()).kind(), "error");
+    }
+
+    #[test]
+    fn to_structured_json_is_valid_json_with_error_kind() {
+        let json_str = ApiError::Auth("bad".into()).to_structured_json();
+        let val: serde_json::Value = serde_json::from_str(&json_str).expect("valid JSON");
+        assert_eq!(val["error"]["kind"], "auth_error");
+        assert_eq!(val["error"]["retryable"], false);
+        assert!(val["error"]["hint"].is_string());
+
+        let json_str2 = ApiError::RateLimit.to_structured_json();
+        let val2: serde_json::Value = serde_json::from_str(&json_str2).expect("valid JSON");
+        assert_eq!(val2["error"]["kind"], "rate_limit");
+        assert_eq!(val2["error"]["retryable"], true);
     }
 }

@@ -6,11 +6,47 @@ pub async fn list(
     client: &mut ZoomClient,
     out: &OutputConfig,
     status: Option<&str>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    fields: Option<&[String]>,
 ) -> Result<(), ApiError> {
     let result = client.list_users(status).await?;
 
     if out.json {
-        out.print_data(&serde_json::to_string_pretty(&result).expect("serialize"));
+        let mut items: Vec<serde_json::Value> = result
+            .users
+            .iter()
+            .map(|u| serde_json::to_value(u).expect("serialize"))
+            .collect();
+
+        if let Some(field_list) = fields {
+            items = items
+                .into_iter()
+                .map(|mut item| {
+                    if let Some(obj) = item.as_object_mut() {
+                        obj.retain(|k, _| field_list.iter().any(|f| f == k));
+                    }
+                    item
+                })
+                .collect();
+        }
+
+        let total = result.total_records.unwrap_or(items.len() as u64);
+        let offset_val = offset.unwrap_or(0) as usize;
+        let limited: Vec<serde_json::Value> = items
+            .into_iter()
+            .skip(offset_val)
+            .take(limit.unwrap_or(u32::MAX) as usize)
+            .collect();
+        let actual_limit = limit.unwrap_or(limited.len() as u32);
+
+        let envelope = serde_json::json!({
+            "items": limited,
+            "total": total,
+            "limit": actual_limit,
+            "offset": offset.unwrap_or(0)
+        });
+        out.print_data(&serde_json::to_string_pretty(&envelope).expect("serialize"));
     } else {
         if result.users.is_empty() {
             out.print_message("No users found.");
@@ -142,7 +178,9 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        list(&mut client, &test_out_json(), None).await.unwrap();
+        list(&mut client, &test_out_json(), None, None, None, None)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

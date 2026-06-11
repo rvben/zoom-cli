@@ -30,11 +30,47 @@ pub async fn list(
     out: &OutputConfig,
     user: &str,
     meeting_type: Option<&str>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    fields: Option<&[String]>,
 ) -> Result<(), ApiError> {
     let result = client.list_meetings(user, meeting_type).await?;
 
     if out.json {
-        out.print_data(&serde_json::to_string_pretty(&result).expect("serialize"));
+        let mut items: Vec<serde_json::Value> = result
+            .meetings
+            .iter()
+            .map(|m| serde_json::to_value(m).expect("serialize"))
+            .collect();
+
+        if let Some(field_list) = fields {
+            items = items
+                .into_iter()
+                .map(|mut item| {
+                    if let Some(obj) = item.as_object_mut() {
+                        obj.retain(|k, _| field_list.iter().any(|f| f == k));
+                    }
+                    item
+                })
+                .collect();
+        }
+
+        let total = result.total_records.unwrap_or(items.len() as u64);
+        let offset_val = offset.unwrap_or(0) as usize;
+        let limited: Vec<serde_json::Value> = items
+            .into_iter()
+            .skip(offset_val)
+            .take(limit.unwrap_or(u32::MAX) as usize)
+            .collect();
+        let actual_limit = limit.unwrap_or(limited.len() as u32);
+
+        let envelope = serde_json::json!({
+            "items": limited,
+            "total": total,
+            "limit": actual_limit,
+            "offset": offset.unwrap_or(0)
+        });
+        out.print_data(&serde_json::to_string_pretty(&envelope).expect("serialize"));
     } else {
         if result.meetings.is_empty() {
             out.print_message("No meetings found.");
@@ -174,7 +210,13 @@ pub async fn delete(
     client: &mut ZoomClient,
     out: &OutputConfig,
     meeting_id: u64,
+    yes: bool,
 ) -> Result<(), ApiError> {
+    if !yes {
+        return Err(ApiError::ConfirmationRequired(
+            "Deleting a meeting is irreversible. Pass --yes to confirm.".into(),
+        ));
+    }
     client.delete_meeting(meeting_id).await?;
 
     out.print_result(
@@ -318,7 +360,9 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        list(&mut client, &test_out(), "me", None).await.unwrap();
+        list(&mut client, &test_out(), "me", None, None, None, None)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -350,6 +394,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn meetings_delete_without_yes_returns_confirmation_required() {
+        let server = MockServer::start().await;
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        let err = delete(&mut client, &test_out(), 111222333, false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ApiError::ConfirmationRequired(_)),
+            "deleting without --yes must return ConfirmationRequired"
+        );
+    }
+
+    #[tokio::test]
     async fn meetings_delete_succeeds_on_204() {
         let server = MockServer::start().await;
         Mock::given(method("DELETE"))
@@ -360,7 +418,9 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        delete(&mut client, &test_out(), 111222333).await.unwrap();
+        delete(&mut client, &test_out(), 111222333, true)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

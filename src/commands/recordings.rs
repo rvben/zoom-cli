@@ -17,18 +17,54 @@ fn sanitize_path_component(s: &str) -> String {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn list(
     client: &mut ZoomClient,
     out: &OutputConfig,
     user: &str,
     from: Option<&str>,
     to: Option<&str>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    fields: Option<&[String]>,
 ) -> Result<(), ApiError> {
     let result = client.list_recordings(user, from, to).await?;
     let recordings = result.recordings.as_deref().unwrap_or_default();
 
     if out.json {
-        out.print_data(&serde_json::to_string_pretty(&result).expect("serialize"));
+        let mut items: Vec<serde_json::Value> = recordings
+            .iter()
+            .map(|r| serde_json::to_value(r).expect("serialize"))
+            .collect();
+
+        if let Some(field_list) = fields {
+            items = items
+                .into_iter()
+                .map(|mut item| {
+                    if let Some(obj) = item.as_object_mut() {
+                        obj.retain(|k, _| field_list.iter().any(|f| f == k));
+                    }
+                    item
+                })
+                .collect();
+        }
+
+        let total = result.total_records.unwrap_or(items.len() as u64);
+        let offset_val = offset.unwrap_or(0) as usize;
+        let limited: Vec<serde_json::Value> = items
+            .into_iter()
+            .skip(offset_val)
+            .take(limit.unwrap_or(u32::MAX) as usize)
+            .collect();
+        let actual_limit = limit.unwrap_or(limited.len() as u32);
+
+        let envelope = serde_json::json!({
+            "items": limited,
+            "total": total,
+            "limit": actual_limit,
+            "offset": offset.unwrap_or(0)
+        });
+        out.print_data(&serde_json::to_string_pretty(&envelope).expect("serialize"));
     } else {
         if recordings.is_empty() {
             out.print_message("No recordings found.");
@@ -256,7 +292,13 @@ pub async fn delete(
     out: &OutputConfig,
     meeting_id: &str,
     trash: bool,
+    yes: bool,
 ) -> Result<(), ApiError> {
+    if !yes {
+        return Err(ApiError::ConfirmationRequired(
+            "Deleting recordings is irreversible. Pass --yes to confirm.".into(),
+        ));
+    }
     client.delete_recording(meeting_id, trash).await?;
     let disposition = if trash {
         "moved to trash"
@@ -309,7 +351,7 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        list(&mut client, &test_out(), "me", None, None)
+        list(&mut client, &test_out(), "me", None, None, None, None, None)
             .await
             .unwrap();
     }
@@ -389,7 +431,7 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        delete(&mut client, &test_out(), "abc123", true)
+        delete(&mut client, &test_out(), "abc123", true, true)
             .await
             .unwrap();
     }
@@ -405,9 +447,23 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        delete(&mut client, &test_out(), "abc123", false)
+        delete(&mut client, &test_out(), "abc123", false, true)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn recordings_delete_without_yes_returns_confirmation_required() {
+        let server = MockServer::start().await;
+        let mut client =
+            ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
+        let err = delete(&mut client, &test_out(), "abc123", true, false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ApiError::ConfirmationRequired(_)),
+            "deleting without --yes must return ConfirmationRequired"
+        );
     }
 
     #[tokio::test]
@@ -421,7 +477,7 @@ mod tests {
 
         let mut client =
             ZoomClient::new_for_test(format!("{}/v2", server.uri()), server.uri(), "tok".into());
-        let err = delete(&mut client, &test_out(), "nope", true)
+        let err = delete(&mut client, &test_out(), "nope", true, true)
             .await
             .unwrap_err();
         assert!(matches!(err, ApiError::NotFound(_)));

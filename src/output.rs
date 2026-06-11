@@ -17,6 +17,13 @@ pub fn hyperlink(url: &str) -> String {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum OutputFormat {
+    Auto,
+    Text,
+    Json,
+}
+
 #[derive(Clone)]
 pub struct OutputConfig {
     pub json: bool,
@@ -27,8 +34,9 @@ pub struct OutputConfig {
 }
 
 impl OutputConfig {
-    pub fn new(json_flag: bool, quiet: bool) -> Self {
-        let json = json_flag || !std::io::stdout().is_terminal();
+    pub fn new(format: OutputFormat, quiet: bool) -> Self {
+        let json = matches!(format, OutputFormat::Json)
+            || (matches!(format, OutputFormat::Auto) && !std::io::stdout().is_terminal());
         Self {
             json,
             quiet,
@@ -91,6 +99,17 @@ impl OutputConfig {
         };
         (out, buf)
     }
+
+    /// JSON-mode config that captures all `print_data` calls to the returned buffer.
+    pub fn capturing_json() -> (Self, Arc<Mutex<Vec<String>>>) {
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let out = Self {
+            json: true,
+            quiet: true,
+            captured: Some(Arc::clone(&buf)),
+        };
+        (out, buf)
+    }
 }
 
 /// Exit codes for agent-friendly error handling.
@@ -107,8 +126,11 @@ pub mod exit_codes {
 
     pub fn for_error(e: &ApiError) -> i32 {
         match e {
-            ApiError::Auth(_) | ApiError::InvalidInput(_) => CONFIG_ERROR,
+            ApiError::Auth(_) | ApiError::InvalidInput(_) | ApiError::ConfirmationRequired(_) => {
+                CONFIG_ERROR
+            }
             ApiError::NotFound(_) => NOT_FOUND,
+            ApiError::Conflict(_) => GENERAL_ERROR,
             _ => GENERAL_ERROR,
         }
     }
@@ -267,6 +289,10 @@ mod tests {
         assert_eq!(
             exit_codes::for_error(&ApiError::RateLimit),
             exit_codes::GENERAL_ERROR
+        );
+        assert_eq!(
+            exit_codes::for_error(&ApiError::ConfirmationRequired("x".into())),
+            exit_codes::CONFIG_ERROR
         );
     }
 }

@@ -1,14 +1,14 @@
 use clap::{CommandFactory, Parser, Subcommand};
 
 use zoom_cli::config::Config;
-use zoom_cli::output::{OutputConfig, exit_codes};
+use zoom_cli::output::{OutputConfig, OutputFormat, exit_codes};
 use zoom_cli::{api, commands};
 
 #[derive(Parser)]
 #[command(
     name = "zoom",
     version,
-    about = "CLI for the Zoom API",
+    about = "CLI for the Zoom API. Run 'zoom schema' for machine-readable command reference.",
     arg_required_else_help = true
 )]
 struct Cli {
@@ -16,8 +16,12 @@ struct Cli {
     #[arg(long, env = "ZOOM_PROFILE", global = true)]
     profile: Option<String>,
 
-    /// Output as JSON (auto-enabled when stdout is not a terminal)
-    #[arg(long, global = true)]
+    /// Output format: auto (default), text, json [env: ZOOM_OUTPUT]
+    #[arg(long = "output", short = 'o', global = true, default_value = "auto", env = "ZOOM_OUTPUT", value_parser = ["auto", "text", "json"])]
+    output: String,
+
+    /// Output as JSON (alias for --output=json)
+    #[arg(long, global = true, hide = true)]
     json: bool,
 
     /// Suppress non-data output (counts, confirmations)
@@ -61,11 +65,8 @@ enum Command {
         profile: Option<String>,
     },
 
-    /// Print schema/field reference for a resource
-    Schema {
-        /// Resource name: meetings, recordings, users, reports, webinars
-        resource: String,
-    },
+    /// Print machine-readable clispec v0.2 schema
+    Schema,
 
     /// Generate shell completions
     Completions {
@@ -96,6 +97,15 @@ enum MeetingsCommand {
         user: String,
         #[arg(long)]
         r#type: Option<String>,
+        /// Maximum number of results to return
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Number of results to skip
+        #[arg(long)]
+        offset: Option<u32>,
+        /// Comma-separated fields to include in output
+        #[arg(long, value_delimiter = ',')]
+        fields: Option<Vec<String>>,
     },
     /// Get a meeting by ID
     Get { id: u64 },
@@ -121,7 +131,12 @@ enum MeetingsCommand {
         start: Option<String>,
     },
     /// Delete a meeting
-    Delete { id: u64 },
+    Delete {
+        id: u64,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
     /// End a live meeting
     End { id: u64 },
     /// List participants from a past meeting
@@ -143,6 +158,12 @@ enum RecordingsCommand {
         from: Option<String>,
         #[arg(long)]
         to: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
+        #[arg(long, value_delimiter = ',')]
+        fields: Option<Vec<String>>,
     },
     /// Get recording details for a meeting
     Get {
@@ -163,6 +184,9 @@ enum RecordingsCommand {
         /// Permanently delete instead of moving to trash (irreversible)
         #[arg(long)]
         permanent: bool,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        yes: bool,
     },
     /// Start cloud recording for a live meeting
     Start {
@@ -199,6 +223,12 @@ enum UsersCommand {
     List {
         #[arg(long)]
         status: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
+        #[arg(long, value_delimiter = ',')]
+        fields: Option<Vec<String>>,
     },
     /// Get a user by ID or email
     Get { id_or_email: String },
@@ -228,6 +258,12 @@ enum WebinarsCommand {
     List {
         #[arg(long, default_value = "me")]
         user: String,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
+        #[arg(long, value_delimiter = ',')]
+        fields: Option<Vec<String>>,
     },
     /// Get a webinar by ID
     Get { id: u64 },
@@ -245,6 +281,12 @@ enum ReportsCommand {
         /// End date (YYYY-MM-DD, default: today)
         #[arg(long)]
         to: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
+        #[arg(long, value_delimiter = ',')]
+        fields: Option<Vec<String>>,
     },
     /// Participant report for a past meeting
     Participants {
@@ -255,8 +297,40 @@ enum ReportsCommand {
 
 #[tokio::main]
 async fn main() {
-    let cli = Cli::parse();
-    let out = OutputConfig::new(cli.json, cli.quiet);
+    let cli = match Cli::try_parse() {
+        Ok(c) => c,
+        Err(e) => {
+            // DisplayHelp and DisplayVersion are not errors — let clap handle them normally.
+            if matches!(
+                e.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) {
+                e.exit();
+            }
+            // For all real parse errors, emit a structured error envelope on stderr
+            // so the last non-empty line satisfies the CLI spec contract.
+            let envelope = serde_json::json!({
+                "error": {
+                    "kind": "invalid_input",
+                    "message": e.to_string().lines().next().unwrap_or("Parse error").trim().to_string(),
+                    "retryable": false
+                }
+            });
+            eprintln!("{}", envelope);
+            // clap exits with code 2 for usage errors; preserve that.
+            std::process::exit(2);
+        }
+    };
+    let format = if cli.json {
+        OutputFormat::Json
+    } else {
+        match cli.output.as_str() {
+            "json" => OutputFormat::Json,
+            "text" => OutputFormat::Text,
+            _ => OutputFormat::Auto,
+        }
+    };
+    let out = OutputConfig::new(format, cli.quiet);
 
     // These commands do not require credentials.
     match &cli.command {
@@ -266,20 +340,20 @@ async fn main() {
         }
         Command::Config(ConfigCommand::Delete { profile, force }) => {
             if let Err(e) = commands::config::delete(profile, *force, &out) {
-                eprintln!("{e}");
+                eprintln!("{}", e.to_structured_json());
                 std::process::exit(exit_codes::for_error(&e));
             }
             return;
         }
         Command::Init { profile } => {
             if let Err(e) = commands::init::init(profile.clone()).await {
-                eprintln!("{e}");
+                eprintln!("{}", e.to_structured_json());
                 std::process::exit(exit_codes::for_error(&e));
             }
             return;
         }
-        Command::Schema { resource } => {
-            commands::schema(resource, &out);
+        Command::Schema => {
+            commands::schema();
             return;
         }
         Command::Completions { shell } => {
@@ -292,7 +366,7 @@ async fn main() {
     let cfg = match Config::load(cli.profile) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{e}");
+            eprintln!("{}", e.to_structured_json());
             std::process::exit(exit_codes::CONFIG_ERROR);
         }
     };
@@ -301,8 +375,23 @@ async fn main() {
 
     let result = match cli.command {
         Command::Meetings(cmd) => match cmd {
-            MeetingsCommand::List { user, r#type } => {
-                commands::meetings::list(&mut client, &out, &user, r#type.as_deref()).await
+            MeetingsCommand::List {
+                user,
+                r#type,
+                limit,
+                offset,
+                fields,
+            } => {
+                commands::meetings::list(
+                    &mut client,
+                    &out,
+                    &user,
+                    r#type.as_deref(),
+                    limit,
+                    offset,
+                    fields.as_deref(),
+                )
+                .await
             }
             MeetingsCommand::Get { id } => commands::meetings::get(&mut client, &out, id).await,
             MeetingsCommand::Create {
@@ -320,8 +409,8 @@ async fn main() {
                 duration,
                 start,
             } => commands::meetings::update(&mut client, &out, id, topic, duration, start).await,
-            MeetingsCommand::Delete { id } => {
-                commands::meetings::delete(&mut client, &out, id).await
+            MeetingsCommand::Delete { id, yes } => {
+                commands::meetings::delete(&mut client, &out, id, yes).await
             }
             MeetingsCommand::End { id } => commands::meetings::end(&mut client, &out, id).await,
             MeetingsCommand::Participants { meeting_id } => {
@@ -332,9 +421,25 @@ async fn main() {
             }
         },
         Command::Recordings(cmd) => match cmd {
-            RecordingsCommand::List { user, from, to } => {
-                commands::recordings::list(&mut client, &out, &user, from.as_deref(), to.as_deref())
-                    .await
+            RecordingsCommand::List {
+                user,
+                from,
+                to,
+                limit,
+                offset,
+                fields,
+            } => {
+                commands::recordings::list(
+                    &mut client,
+                    &out,
+                    &user,
+                    from.as_deref(),
+                    to.as_deref(),
+                    limit,
+                    offset,
+                    fields.as_deref(),
+                )
+                .await
             }
             RecordingsCommand::Get { meeting_id } => {
                 commands::recordings::get(&mut client, &out, &meeting_id).await
@@ -358,15 +463,31 @@ async fn main() {
             RecordingsCommand::Delete {
                 meeting_id,
                 permanent,
-            } => commands::recordings::delete(&mut client, &out, &meeting_id, !permanent).await,
+                yes,
+            } => {
+                commands::recordings::delete(&mut client, &out, &meeting_id, !permanent, yes).await
+            }
             RecordingsCommand::Transcript {
                 meeting_id,
                 out: out_dir,
             } => commands::recordings::transcript(&mut client, &out, &meeting_id, &out_dir).await,
         },
         Command::Users(cmd) => match cmd {
-            UsersCommand::List { status } => {
-                commands::users::list(&mut client, &out, status.as_deref()).await
+            UsersCommand::List {
+                status,
+                limit,
+                offset,
+                fields,
+            } => {
+                commands::users::list(
+                    &mut client,
+                    &out,
+                    status.as_deref(),
+                    limit,
+                    offset,
+                    fields.as_deref(),
+                )
+                .await
             }
             UsersCommand::Get { id_or_email } => {
                 commands::users::get(&mut client, &out, &id_or_email).await
@@ -389,29 +510,52 @@ async fn main() {
             }
         },
         Command::Reports(cmd) => match cmd {
-            ReportsCommand::Meetings { user, from, to } => {
-                commands::reports::meetings(&mut client, &out, &user, &from, to.as_deref()).await
+            ReportsCommand::Meetings {
+                user,
+                from,
+                to,
+                limit,
+                offset,
+                fields,
+            } => {
+                commands::reports::meetings(
+                    &mut client,
+                    &out,
+                    &user,
+                    &from,
+                    to.as_deref(),
+                    limit,
+                    offset,
+                    fields.as_deref(),
+                )
+                .await
             }
             ReportsCommand::Participants { meeting_id } => {
                 commands::reports::participants(&mut client, &out, &meeting_id).await
             }
         },
         Command::Webinars(cmd) => match cmd {
-            WebinarsCommand::List { user } => {
-                commands::webinars::list(&mut client, &out, &user).await
+            WebinarsCommand::List {
+                user,
+                limit,
+                offset,
+                fields,
+            } => {
+                commands::webinars::list(&mut client, &out, &user, limit, offset, fields.as_deref())
+                    .await
             }
             WebinarsCommand::Get { id } => commands::webinars::get(&mut client, &out, id).await,
         },
         Command::Config(ConfigCommand::Show | ConfigCommand::Delete { .. })
         | Command::Init { .. }
-        | Command::Schema { .. }
+        | Command::Schema
         | Command::Completions { .. } => {
             unreachable!()
         }
     };
 
     if let Err(e) = result {
-        eprintln!("{e}");
+        eprintln!("{}", e.to_structured_json());
         std::process::exit(exit_codes::for_error(&e));
     }
 }
