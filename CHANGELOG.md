@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.6](https://github.com/rvben/zoom-cli/compare/v0.2.5...v0.2.6) - 2026-06-20
+
+### Added
+
+- **schema**: fill missing output_fields for all commands ([6f4df02](https://github.com/rvben/zoom-cli/commit/6f4df025ad2d2480350a1d12649da90cf03ccdbc))
+
 ## [0.2.5](https://github.com/rvben/zoom-cli/compare/v0.2.4...v0.2.5) - 2026-06-11
 
 ### Added
