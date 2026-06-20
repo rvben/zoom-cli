@@ -95,6 +95,10 @@ fn schema_doc() -> serde_json::Value {
                 "name": "meetings update",
                 "description": "Update a meeting",
                 "mutating": true,
+                "output_fields": [
+                    {"name": "updated", "type": "boolean", "description": "Always true on success"},
+                    {"name": "id", "type": "integer", "description": "Meeting ID that was updated"}
+                ],
                 "args": [
                     {"name": "id", "type": "integer", "required": true, "description": "Meeting ID"},
                     {"name": "--topic", "type": "string", "description": "New topic"},
@@ -106,6 +110,10 @@ fn schema_doc() -> serde_json::Value {
                 "name": "meetings delete",
                 "description": "Delete a meeting",
                 "mutating": true,
+                "output_fields": [
+                    {"name": "deleted", "type": "boolean", "description": "Always true on success"},
+                    {"name": "id", "type": "integer", "description": "Meeting ID that was deleted"}
+                ],
                 "args": [
                     {"name": "id", "type": "integer", "required": true, "description": "Meeting ID"},
                     {"name": "--yes", "type": "boolean", "default": false, "description": "Skip confirmation prompt"}
@@ -115,6 +123,10 @@ fn schema_doc() -> serde_json::Value {
                 "name": "meetings end",
                 "description": "End a live meeting",
                 "mutating": true,
+                "output_fields": [
+                    {"name": "ended", "type": "boolean", "description": "Always true on success"},
+                    {"name": "id", "type": "integer", "description": "Meeting ID that was ended"}
+                ],
                 "args": [
                     {"name": "id", "type": "integer", "required": true, "description": "Meeting ID"}
                 ]
@@ -186,6 +198,11 @@ fn schema_doc() -> serde_json::Value {
                 "name": "recordings download",
                 "description": "Download recording files for a meeting",
                 "mutating": false,
+                "output_fields": [
+                    {"name": "downloaded", "type": "integer", "description": "Number of files successfully downloaded"},
+                    {"name": "meeting_id", "type": "string", "description": "Meeting ID or UUID that was downloaded"},
+                    {"name": "out_dir", "type": "string", "description": "Directory files were written to"}
+                ],
                 "args": [
                     {"name": "meeting_id", "type": "string", "required": true, "description": "Meeting ID or UUID"},
                     {"name": "--out", "type": "path", "default": ".", "description": "Output directory"}
@@ -195,6 +212,11 @@ fn schema_doc() -> serde_json::Value {
                 "name": "recordings delete",
                 "description": "Delete all cloud recordings for a meeting",
                 "mutating": true,
+                "output_fields": [
+                    {"name": "deleted", "type": "boolean", "description": "Always true on success"},
+                    {"name": "meeting_id", "type": "string", "description": "Meeting ID or UUID whose recordings were deleted"},
+                    {"name": "trash", "type": "boolean", "description": "True if moved to trash, false if permanently deleted"}
+                ],
                 "args": [
                     {"name": "meeting_id", "type": "string", "required": true, "description": "Meeting ID or UUID"},
                     {"name": "--permanent", "type": "boolean", "default": false, "description": "Permanently delete instead of moving to trash"},
@@ -205,6 +227,10 @@ fn schema_doc() -> serde_json::Value {
                 "name": "recordings start",
                 "description": "Start cloud recording for a live meeting",
                 "mutating": true,
+                "output_fields": [
+                    {"name": "action", "type": "string", "description": "The action performed (always 'start')"},
+                    {"name": "meeting_id", "type": "integer", "description": "Numeric meeting ID the action was applied to"}
+                ],
                 "args": [
                     {"name": "meeting_id", "type": "integer", "required": true, "description": "Numeric meeting ID of the live meeting"}
                 ]
@@ -213,6 +239,10 @@ fn schema_doc() -> serde_json::Value {
                 "name": "recordings stop",
                 "description": "Stop cloud recording for a live meeting",
                 "mutating": true,
+                "output_fields": [
+                    {"name": "action", "type": "string", "description": "The action performed (always 'stop')"},
+                    {"name": "meeting_id", "type": "integer", "description": "Numeric meeting ID the action was applied to"}
+                ],
                 "args": [
                     {"name": "meeting_id", "type": "integer", "required": true, "description": "Numeric meeting ID of the live meeting"}
                 ]
@@ -221,6 +251,10 @@ fn schema_doc() -> serde_json::Value {
                 "name": "recordings pause",
                 "description": "Pause cloud recording for a live meeting",
                 "mutating": true,
+                "output_fields": [
+                    {"name": "action", "type": "string", "description": "The action performed (always 'pause')"},
+                    {"name": "meeting_id", "type": "integer", "description": "Numeric meeting ID the action was applied to"}
+                ],
                 "args": [
                     {"name": "meeting_id", "type": "integer", "required": true, "description": "Numeric meeting ID of the live meeting"}
                 ]
@@ -229,6 +263,10 @@ fn schema_doc() -> serde_json::Value {
                 "name": "recordings resume",
                 "description": "Resume cloud recording for a live meeting",
                 "mutating": true,
+                "output_fields": [
+                    {"name": "action", "type": "string", "description": "The action performed (always 'resume')"},
+                    {"name": "meeting_id", "type": "integer", "description": "Numeric meeting ID the action was applied to"}
+                ],
                 "args": [
                     {"name": "meeting_id", "type": "integer", "required": true, "description": "Numeric meeting ID of the live meeting"}
                 ]
@@ -237,6 +275,10 @@ fn schema_doc() -> serde_json::Value {
                 "name": "recordings transcript",
                 "description": "Download transcript files (VTT/chat) for a meeting",
                 "mutating": false,
+                "output_fields": [
+                    {"name": "files_downloaded", "type": "integer", "description": "Number of transcript/chat files downloaded"},
+                    {"name": "paths", "type": "array", "description": "Absolute paths of the downloaded files"}
+                ],
                 "args": [
                     {"name": "meeting_id", "type": "string", "required": true, "description": "Meeting ID or UUID"},
                     {"name": "--out", "type": "path", "default": ".", "description": "Output directory"}
@@ -315,6 +357,7 @@ fn schema_doc() -> serde_json::Value {
                 "name": "users deactivate",
                 "description": "Deactivate a user",
                 "mutating": true,
+                "output_fields": [],
                 "args": [
                     {"name": "id_or_email", "type": "string", "required": true, "description": "User ID or email"}
                 ]
@@ -323,6 +366,7 @@ fn schema_doc() -> serde_json::Value {
                 "name": "users activate",
                 "description": "Activate (reactivate) a user",
                 "mutating": true,
+                "output_fields": [],
                 "args": [
                     {"name": "id_or_email", "type": "string", "required": true, "description": "User ID or email"}
                 ]
@@ -414,6 +458,7 @@ fn schema_doc() -> serde_json::Value {
                 "name": "config delete",
                 "description": "Delete a profile from the config file",
                 "mutating": true,
+                "output_fields": [],
                 "args": [
                     {"name": "profile", "type": "string", "required": true, "description": "Profile name to delete"},
                     {"name": "--force", "type": "boolean", "default": false, "description": "Skip confirmation prompt"}
@@ -421,8 +466,16 @@ fn schema_doc() -> serde_json::Value {
             },
             {
                 "name": "init",
-                "description": "Set up credentials interactively",
+                "description": "Set up credentials interactively. When stdout is not a TTY, prints JSON setup instructions instead.",
                 "mutating": true,
+                "output_fields": [
+                    {"name": "configPath", "type": "string", "description": "Absolute path to the config file that will be written"},
+                    {"name": "tokenInstructions", "type": "object", "description": "Step-by-step instructions for creating a Server-to-Server OAuth app"},
+                    {"name": "requiredCredentials", "type": "array", "description": "Credential keys required in the config file: account_id, client_id, client_secret"},
+                    {"name": "requiredScopes", "type": "array", "description": "Zoom OAuth scopes that must be granted to the app"},
+                    {"name": "optionalScopes", "type": "array", "description": "Zoom OAuth scopes that unlock additional commands"},
+                    {"name": "example", "type": "object", "description": "Example config file path and format"}
+                ],
                 "args": [
                     {"name": "--profile", "type": "string", "description": "Profile name to create or update"}
                 ]
