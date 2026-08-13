@@ -214,8 +214,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           path: |
-            zoom-cli-*-${{ matrix.target }}.tar.gz*
-            zoom-cli-*-${{ matrix.target }}.zip*
+            zoom-cli-${{ github.ref_name }}-${{ matrix.target }}.tar.gz*
+            zoom-cli-${{ github.ref_name }}-${{ matrix.target }}.zip*
           name: release-${{ matrix.target }}
 
   sdist:
@@ -302,10 +302,10 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/release-*/zoom-cli-*.tar.gz
-            artifacts/release-*/zoom-cli-*.tar.gz.sha256
-            artifacts/release-*/zoom-cli-*.zip
-            artifacts/release-*/zoom-cli-*.zip.sha256
+            artifacts/release-*/zoom-cli-${{ github.ref_name }}-*.tar.gz
+            artifacts/release-*/zoom-cli-${{ github.ref_name }}-*.tar.gz.sha256
+            artifacts/release-*/zoom-cli-${{ github.ref_name }}-*.zip
+            artifacts/release-*/zoom-cli-${{ github.ref_name }}-*.zip.sha256
 
       - name: Dry Run Summary
         if: ${{ inputs.dry_run == true }}
