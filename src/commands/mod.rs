@@ -7,8 +7,8 @@ pub mod users;
 pub mod webinars;
 
 fn schema_doc() -> serde_json::Value {
-    serde_json::json!({
-        "clispec": "0.2",
+    let mut schema = serde_json::json!({
+        "clispec": "0.3",
         "name": "zoom",
         "version": env!("CARGO_PKG_VERSION"),
         "description": "CLI for the Zoom API",
@@ -197,7 +197,7 @@ fn schema_doc() -> serde_json::Value {
             {
                 "name": "recordings download",
                 "description": "Download recording files for a meeting",
-                "mutating": false,
+                "mutating": true,
                 "output_fields": [
                     {"name": "downloaded", "type": "integer", "description": "Number of files successfully downloaded"},
                     {"name": "meeting_id", "type": "string", "description": "Meeting ID or UUID that was downloaded"},
@@ -274,7 +274,7 @@ fn schema_doc() -> serde_json::Value {
             {
                 "name": "recordings transcript",
                 "description": "Download transcript files (VTT/chat) for a meeting",
-                "mutating": false,
+                "mutating": true,
                 "output_fields": [
                     {"name": "files_downloaded", "type": "integer", "description": "Number of transcript/chat files downloaded"},
                     {"name": "paths", "type": "array", "description": "Absolute paths of the downloaded files"}
@@ -482,7 +482,7 @@ fn schema_doc() -> serde_json::Value {
             },
             {
                 "name": "schema",
-                "description": "Print machine-readable clispec v0.2 schema",
+                "description": "Print the machine-readable clispec v0.3 schema",
                 "mutating": false
             },
             {
@@ -505,7 +505,111 @@ fn schema_doc() -> serde_json::Value {
             {"kind": "confirmation_required", "exit_code": 2, "retryable": false, "description": "Destructive operation requires explicit confirmation"},
             {"kind": "conflict", "exit_code": 1, "retryable": false, "description": "Resource already exists or state conflict"}
         ]
-    })
+    });
+    enrich_v0_3(&mut schema);
+    schema
+}
+
+fn enrich_v0_3(schema: &mut serde_json::Value) {
+    schema["output"] = serde_json::json!({"tty":"text","piped":"json"});
+    let Some(commands) = schema["commands"].as_array_mut() else {
+        return;
+    };
+    for command in commands {
+        let Some(object) = command.as_object_mut() else {
+            continue;
+        };
+        let name = object["name"].as_str().unwrap_or_default().to_string();
+        let mutating = object["mutating"].as_bool().unwrap_or(false);
+        object.insert(
+            "effects".into(),
+            serde_json::json!(if !mutating {
+                "read_only"
+            } else if name.ends_with(" create") {
+                "non_idempotent"
+            } else {
+                "idempotent"
+            }),
+        );
+
+        if name == "completions" {
+            object.insert("output_kind".into(), serde_json::json!("opaque"));
+            object.insert("media_type".into(), serde_json::json!("text/plain"));
+            continue;
+        }
+
+        let unbounded = matches!(
+            name.as_str(),
+            "meetings list"
+                | "recordings list"
+                | "users list"
+                | "webinars list"
+                | "reports meetings"
+        );
+        object.insert(
+            "cardinality".into(),
+            serde_json::json!(if unbounded { "unbounded" } else { "bounded" }),
+        );
+        if unbounded {
+            object.insert(
+                "pagination".into(),
+                serde_json::json!({"style":"offset","limit_arg":"--limit","offset_arg":"--offset"}),
+            );
+            object.insert("fields_arg".into(), serde_json::json!("--fields"));
+        }
+        if matches!(
+            name.as_str(),
+            "meetings delete" | "recordings delete" | "config delete"
+        ) {
+            object.insert(
+                "confirmation_bypass_arg".into(),
+                serde_json::json!(if name == "config delete" {
+                    "--force"
+                } else {
+                    "--yes"
+                }),
+            );
+        }
+        if name == "config show" {
+            object.insert(
+                "example".into(),
+                serde_json::json!({"args":["config","show"]}),
+            );
+        }
+        if name == "schema" {
+            object.insert("cardinality".into(), serde_json::json!("single"));
+            object.insert(
+                "stdout_schema".into(),
+                serde_json::json!({"$ref":"https://clispec.dev/schema/v0.3.json"}),
+            );
+        }
+
+        if let Some(fields) = object
+            .get_mut("output_fields")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for field in fields {
+                let Some(field) = field.as_object_mut() else {
+                    continue;
+                };
+                if field.get("type").and_then(serde_json::Value::as_str) == Some("array")
+                    && !field.contains_key("items")
+                {
+                    let string_items = matches!(
+                        field.get("name").and_then(serde_json::Value::as_str),
+                        Some("paths" | "requiredCredentials" | "requiredScopes" | "optionalScopes")
+                    );
+                    field.insert(
+                        "items".into(),
+                        serde_json::json!({"type": if string_items { "string" } else { "object" }}),
+                    );
+                }
+            }
+        }
+        if !object.contains_key("output_fields") && !object.contains_key("stdout_schema") {
+            object.insert("stdout_schema".into(), serde_json::json!({}));
+        }
+    }
 }
 
 pub fn schema() {
@@ -523,10 +627,10 @@ mod tests {
     #[test]
     fn schema_output_is_valid_json_with_required_fields() {
         let doc = schema_doc();
-        assert_eq!(doc["clispec"], "0.2");
+        assert_eq!(doc["clispec"], "0.3");
         assert_eq!(doc["name"], "zoom");
         assert!(!doc["version"].as_str().unwrap_or("").is_empty());
-        assert!(doc["commands"].as_array().unwrap().len() > 0);
+        assert!(!doc["commands"].as_array().unwrap().is_empty());
         let errors = doc["errors"].as_array().unwrap();
         assert!(!errors.is_empty());
         assert!(
@@ -537,8 +641,8 @@ mod tests {
     }
 
     #[test]
-    fn schema_output_validates_against_clispec_v0_2_json_schema() {
-        let schema_json = include_str!("../../tests/fixtures/clispec-v0.2.json");
+    fn schema_output_validates_against_clispec_v0_3_json_schema() {
+        let schema_json = include_str!("../../tests/fixtures/clispec-v0.3.json");
         let meta_schema: serde_json::Value =
             serde_json::from_str(schema_json).expect("fixture must be valid JSON");
         let validator =
@@ -547,7 +651,7 @@ mod tests {
         let errors: Vec<String> = validator.iter_errors(&doc).map(|e| e.to_string()).collect();
         assert!(
             errors.is_empty(),
-            "schema output does not validate against clispec v0.2:\n{}",
+            "schema output does not validate against clispec v0.3:\n{}",
             errors.join("\n")
         );
     }

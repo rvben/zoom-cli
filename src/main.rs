@@ -65,7 +65,7 @@ enum Command {
         profile: Option<String>,
     },
 
-    /// Print machine-readable clispec v0.2 schema
+    /// Print machine-readable clispec v0.3 schema
     Schema,
 
     /// Generate shell completions
