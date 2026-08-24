@@ -180,3 +180,8 @@ The `schema` command outputs a JSON description of resource fields and types -- 
 ## License
 
 MIT
+
+## Releasing
+
+Vership owns versioning, changelog generation, release commits, and tags. See
+[the release runbook](docs/releases.md) for the verified workflow and recovery policy.
