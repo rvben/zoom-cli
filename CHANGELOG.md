@@ -4,11 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.8](https://github.com/rvben/zoom-cli/compare/v0.2.7...v0.2.8) - 2026-09-03
 
+### Added
 
+- **auth**: standardize authentication workflow ([02077dd](https://github.com/rvben/zoom-cli/commit/02077dd76d05663bf301f9d6f1124db8618fbb0a))
 
+### Fixed
 
-
+- **release**: use package version in dry runs ([0ad9bd4](https://github.com/rvben/zoom-cli/commit/0ad9bd4fac6559c9f01e28b03d4d62ea27a94079))
+- **ci**: install pinned Rust components ([2124aed](https://github.com/rvben/zoom-cli/commit/2124aed1980bfde40c29a90bf573a761cdc824db))
+- **release**: scope assets to the current tag ([6f0055e](https://github.com/rvben/zoom-cli/commit/6f0055ecdbb1786ebe1e7e0f672916e3ba36512b))
 
 ## [0.2.6](https://github.com/rvben/zoom-cli/compare/v0.2.5...v0.2.6) - 2026-06-20
 
