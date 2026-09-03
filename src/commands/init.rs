@@ -175,7 +175,10 @@ fn load_existing_profile_names(config_path: &Path) -> Vec<String> {
         Ok(t) => t,
         Err(_) => return Vec::new(),
     };
-    table.keys().cloned().collect()
+    table
+        .into_iter()
+        .filter_map(|(name, value)| value.is_table().then_some(name))
+        .collect()
 }
 
 /// Interactive init flow with injectable IO and validator for testing.
@@ -430,6 +433,19 @@ mod tests {
 
     fn fake_path(dir: &TempDir) -> std::path::PathBuf {
         dir.path().join("config.toml")
+    }
+
+    #[test]
+    fn profile_names_ignore_top_level_settings() {
+        let dir = TempDir::new().unwrap();
+        let path = fake_path(&dir);
+        std::fs::write(
+            &path,
+            "active_profile = \"work\"\n\n[default]\naccount_id = \"a\"\n\n[work]\naccount_id = \"b\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(load_existing_profile_names(&path), ["default", "work"]);
     }
 
     #[tokio::test]

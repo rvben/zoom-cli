@@ -15,6 +15,8 @@ struct RawProfile {
 #[derive(Debug, Deserialize, Default)]
 struct RawConfig {
     #[serde(default)]
+    active_profile: Option<String>,
+    #[serde(default)]
     default: RawProfile,
     #[serde(flatten)]
     profiles: BTreeMap<String, RawProfile>,
@@ -23,15 +25,20 @@ struct RawConfig {
 /// Resolved credentials for the active profile.
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub profile: String,
     pub account_id: String,
     pub client_id: String,
     pub client_secret: String,
+    pub credential_source: &'static str,
 }
 
 impl Config {
     /// Load config with priority: env vars > config file profile.
     pub fn load(profile_arg: Option<String>) -> Result<Self, ApiError> {
-        let file_profile = load_file_profile(profile_arg.as_deref())?;
+        let (profile, file_profile) = load_file_profile(profile_arg.as_deref())?;
+        let uses_environment = ["ZOOM_ACCOUNT_ID", "ZOOM_CLIENT_ID", "ZOOM_CLIENT_SECRET"]
+            .iter()
+            .any(|name| env_var(name).is_some());
 
         let account_id = env_var("ZOOM_ACCOUNT_ID")
             .or_else(|| normalize(file_profile.account_id))
@@ -59,9 +66,15 @@ impl Config {
             })?;
 
         Ok(Self {
+            profile,
             account_id,
             client_id,
             client_secret,
+            credential_source: if uses_environment {
+                "environment"
+            } else {
+                "config-file"
+            },
         })
     }
 }
@@ -92,10 +105,15 @@ pub fn load_for_show(profile_arg: Option<&str>) -> ConfigSummary {
     let path = config_path();
     let file_exists = path.exists();
 
+    let stored_active = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| toml::from_str::<RawConfig>(&content).ok())
+        .and_then(|raw| raw.active_profile);
     let active_profile = profile_arg
         .filter(|s| !s.trim().is_empty())
         .map(str::to_owned)
         .or_else(|| env_var("ZOOM_PROFILE"))
+        .or(stored_active)
         .unwrap_or_else(|| "default".to_owned());
 
     let profiles = read_all_profiles(&path);
@@ -140,7 +158,7 @@ pub fn read_profile_credentials(
     ))
 }
 
-fn read_all_profiles(path: &Path) -> Vec<ProfileSummary> {
+pub fn read_all_profiles(path: &Path) -> Vec<ProfileSummary> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
@@ -199,11 +217,19 @@ fn config_dir() -> Option<PathBuf> {
     }
 }
 
-fn load_file_profile(profile: Option<&str>) -> Result<RawProfile, ApiError> {
+fn load_file_profile(profile: Option<&str>) -> Result<(String, RawProfile), ApiError> {
     let path = config_path();
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(RawProfile::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((
+                profile
+                    .and_then(|value| normalize(Some(value.to_owned())))
+                    .or_else(|| env_var("ZOOM_PROFILE"))
+                    .unwrap_or_else(|| "default".to_owned()),
+                RawProfile::default(),
+            ));
+        }
         Err(e) => return Err(ApiError::Other(format!("Failed to read config: {e}"))),
     };
 
@@ -213,23 +239,25 @@ fn load_file_profile(profile: Option<&str>) -> Result<RawProfile, ApiError> {
     let profile_name = profile
         .filter(|s| !s.trim().is_empty())
         .map(str::to_owned)
-        .or_else(|| env_var("ZOOM_PROFILE"));
+        .or_else(|| env_var("ZOOM_PROFILE"))
+        .or_else(|| raw.active_profile.clone())
+        .unwrap_or_else(|| "default".to_owned());
 
-    match profile_name {
-        None => Ok(raw.default),
-        Some(name) if name == "default" => Ok(raw.default),
-        Some(name) => {
+    match profile_name.as_str() {
+        "default" => Ok((profile_name, raw.default)),
+        _ => {
             let available: Vec<&str> = raw.profiles.keys().map(String::as_str).collect();
-            raw.profiles.get(&name).cloned().ok_or_else(|| {
+            let selected = raw.profiles.get(&profile_name).cloned().ok_or_else(|| {
                 ApiError::Other(format!(
-                    "Profile '{name}' not found. Available: {}",
+                    "Profile '{profile_name}' not found. Available: {}",
                     if available.is_empty() {
                         "none".to_owned()
                     } else {
                         available.join(", ")
                     }
                 ))
-            })
+            })?;
+            Ok((profile_name, selected))
         }
     }
 }
@@ -278,6 +306,7 @@ pub fn write_profile(
     profile["client_id"] = toml_edit::value(client_id);
     profile["client_secret"] = toml_edit::value(client_secret);
     doc[profile_name] = toml_edit::Item::Table(profile);
+    doc["active_profile"] = toml_edit::value(profile_name);
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -332,6 +361,9 @@ pub fn delete_profile(path: &Path, profile_name: &str) -> Result<(), ApiError> {
         .parse()
         .map_err(|e| ApiError::Other(format!("Invalid config: {e}")))?;
 
+    let removed_active =
+        doc.get("active_profile").and_then(toml_edit::Item::as_str) == Some(profile_name);
+
     // Both "default" and named profiles are stored as top-level TOML keys.
     if doc.remove(profile_name).is_none() {
         return Err(ApiError::NotFound(format!(
@@ -340,8 +372,70 @@ pub fn delete_profile(path: &Path, profile_name: &str) -> Result<(), ApiError> {
         )));
     }
 
+    if removed_active {
+        let next = doc
+            .iter()
+            .find(|(name, item)| *name != "active_profile" && item.is_table())
+            .map(|(name, _)| name.to_owned());
+        if let Some(next) = next {
+            doc["active_profile"] = toml_edit::value(next);
+        } else {
+            doc.remove("active_profile");
+        }
+    }
+
     write_config_file(path, &doc.to_string())?;
     Ok(())
+}
+
+pub fn selected_profile_name(profile_arg: Option<&str>) -> Result<String, ApiError> {
+    let path = config_path();
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(content) => toml::from_str::<RawConfig>(&content)
+            .map_err(|error| ApiError::Other(format!("Failed to parse config: {error}")))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => RawConfig::default(),
+        Err(error) => return Err(ApiError::Other(format!("Failed to read config: {error}"))),
+    };
+    Ok(profile_arg
+        .and_then(|value| normalize(Some(value.to_owned())))
+        .or_else(|| env_var("ZOOM_PROFILE"))
+        .or(raw.active_profile)
+        .unwrap_or_else(|| "default".to_owned()))
+}
+
+pub fn use_profile(path: &Path, profile_name: &str) -> Result<(), ApiError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|error| ApiError::Other(format!("Failed to read config: {error}")))?;
+    let mut doc: toml_edit::DocumentMut = content
+        .parse()
+        .map_err(|error| ApiError::Other(format!("Invalid config: {error}")))?;
+    if !doc.get(profile_name).is_some_and(toml_edit::Item::is_table) {
+        return Err(ApiError::NotFound(format!(
+            "Profile '{profile_name}' not found."
+        )));
+    }
+    doc["active_profile"] = toml_edit::value(profile_name);
+    write_config_file(path, &doc.to_string())
+}
+
+pub fn remove_profile_secret(path: &Path, profile_name: &str) -> Result<bool, ApiError> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(ApiError::Other(format!("Failed to read config: {error}"))),
+    };
+    let mut doc: toml_edit::DocumentMut = content
+        .parse()
+        .map_err(|error| ApiError::Other(format!("Invalid config: {error}")))?;
+    let removed = doc
+        .get_mut(profile_name)
+        .and_then(toml_edit::Item::as_table_mut)
+        .and_then(|profile| profile.remove("client_secret"))
+        .is_some();
+    if removed {
+        write_config_file(path, &doc.to_string())?;
+    }
+    Ok(removed)
 }
 
 pub fn schema_config_path_description() -> &'static str {
@@ -591,6 +685,42 @@ client_secret = "w-csec"
             after.contains("[work]"),
             "existing profile must be preserved"
         );
+        let parsed: toml::Value = toml::from_str(&after).unwrap();
+        assert_eq!(parsed["active_profile"].as_str(), Some("default"));
+        assert!(
+            parsed["work"].get("active_profile").is_none(),
+            "active_profile must be a top-level setting"
+        );
+    }
+
+    #[test]
+    fn stored_active_profile_is_used_when_no_override_is_present() {
+        let _lock = ProcessEnvLock::acquire().unwrap();
+        let dir = TempDir::new().unwrap();
+        write_config(
+            dir.path(),
+            r#"active_profile = "work"
+
+[default]
+account_id = "default-account"
+client_id = "default-client"
+client_secret = "default-secret"
+
+[work]
+account_id = "work-account"
+client_id = "work-client"
+client_secret = "work-secret"
+"#,
+        )
+        .unwrap();
+
+        let _cfg_dir = set_config_dir_env(dir.path());
+        let _env = clear_zoom_env();
+        let config = Config::load(None).unwrap();
+
+        assert_eq!(config.profile, "work");
+        assert_eq!(config.account_id, "work-account");
+        assert_eq!(config.credential_source, "config-file");
     }
 
     #[test]

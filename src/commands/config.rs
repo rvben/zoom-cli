@@ -88,6 +88,80 @@ pub fn show(profile_arg: Option<&str>, out: &OutputConfig) {
     }
 }
 
+pub fn path(out: &OutputConfig) {
+    let path = config::config_path();
+    out.print_result(
+        &serde_json::json!({"config_path": path}),
+        &path.display().to_string(),
+    );
+}
+
+pub fn list_profiles(profile_arg: Option<&str>, out: &OutputConfig) {
+    let summary = config::load_for_show(profile_arg);
+    let items = summary
+        .profiles
+        .iter()
+        .map(|profile| {
+            serde_json::json!({
+                "name": profile.name,
+                "active": profile.name == summary.active_profile,
+                "account_id": masked_or_unset(&profile.account_id),
+                "client_id": masked_or_unset(&profile.client_id),
+                "configured": profile.account_id.is_some()
+                    && profile.client_id.is_some()
+                    && profile.client_secret.is_some(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if out.json {
+        out.print_data(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "items": items,
+                "total": items.len(),
+            }))
+            .expect("serialize profiles"),
+        );
+    } else if items.is_empty() {
+        out.print_data("No profiles configured. Run `zoom init`.");
+    } else {
+        for item in items {
+            out.print_data(&format!(
+                "{} {:<20} {}",
+                if item["active"].as_bool().unwrap_or(false) {
+                    "*"
+                } else {
+                    " "
+                },
+                item["name"].as_str().unwrap_or_default(),
+                item["account_id"].as_str().unwrap_or("(not set)")
+            ));
+        }
+    }
+}
+
+pub fn use_profile(profile_name: &str, out: &OutputConfig) -> Result<(), ApiError> {
+    config::use_profile(&config::config_path(), profile_name)?;
+    out.print_result(
+        &serde_json::json!({"profile": profile_name, "active": true}),
+        &format!("Active profile set to '{profile_name}'."),
+    );
+    Ok(())
+}
+
+pub fn remove_profile(profile_name: &str, yes: bool, out: &OutputConfig) -> Result<(), ApiError> {
+    if !yes {
+        return Err(ApiError::ConfirmationRequired(
+            "profile removal requires --yes".to_owned(),
+        ));
+    }
+    config::delete_profile(&config::config_path(), profile_name)?;
+    out.print_result(
+        &serde_json::json!({"profile": profile_name, "removed": true}),
+        &format!("Profile '{profile_name}' removed."),
+    );
+    Ok(())
+}
+
 pub fn delete(profile_name: &str, force: bool, out: &OutputConfig) -> Result<(), ApiError> {
     let config_path = config::config_path();
 

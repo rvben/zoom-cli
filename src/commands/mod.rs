@@ -1,4 +1,6 @@
+pub mod auth;
 pub mod config;
+pub mod doctor;
 pub mod init;
 pub mod meetings;
 pub mod recordings;
@@ -449,9 +451,19 @@ fn schema_doc() -> serde_json::Value {
                 "description": "Show current configuration",
                 "mutating": false,
                 "output_fields": [
-                    {"name": "profiles", "type": "array"},
+                    {"name": "config_file", "type": "string"},
+                    {"name": "file_exists", "type": "boolean"},
+                    {"name": "profiles", "type": "object"},
                     {"name": "active_profile", "type": "string"},
                     {"name": "env_overrides", "type": "object"}
+                ]
+            },
+            {
+                "name": "config path",
+                "description": "Print the configuration file path",
+                "mutating": false,
+                "output_fields": [
+                    {"name": "config_path", "type": "string"}
                 ]
             },
             {
@@ -462,6 +474,102 @@ fn schema_doc() -> serde_json::Value {
                 "args": [
                     {"name": "profile", "type": "string", "required": true, "description": "Profile name to delete"},
                     {"name": "--force", "type": "boolean", "default": false, "description": "Skip confirmation prompt"}
+                ]
+            },
+            {
+                "name": "auth login",
+                "description": "Configure credentials interactively and verify them",
+                "mutating": true,
+                "output_fields": [
+                    {"name": "configPath", "type": "string"},
+                    {"name": "tokenInstructions", "type": "object"},
+                    {"name": "requiredCredentials", "type": "array", "items": {"type": "string"}},
+                    {"name": "requiredScopes", "type": "array", "items": {"type": "string"}},
+                    {"name": "optionalScopes", "type": "array", "items": {"type": "string"}},
+                    {"name": "example", "type": "object"}
+                ]
+            },
+            {
+                "name": "auth status",
+                "description": "Show whether credentials are configured and valid",
+                "mutating": false,
+                "output_fields": [
+                    {"name": "profile", "type": "string"},
+                    {"name": "status", "type": "string"},
+                    {"name": "configured", "type": "boolean"},
+                    {"name": "verified", "type": "boolean"},
+                    {"name": "credential_source", "type": "string"}
+                ],
+                "args": [
+                    {"name": "--offline", "type": "boolean", "default": false, "description": "Check local configuration without contacting Zoom"}
+                ]
+            },
+            {
+                "name": "auth logout",
+                "description": "Remove the stored client secret for the selected profile",
+                "mutating": true,
+                "output_fields": [
+                    {"name": "profile", "type": "string"},
+                    {"name": "logged_out", "type": "boolean"},
+                    {"name": "credential_removed", "type": "boolean"},
+                    {"name": "environment_override", "type": "boolean"}
+                ]
+            },
+            {
+                "name": "profile list",
+                "description": "List configured profiles",
+                "mutating": false,
+                "output_fields": [
+                    {"name": "items", "type": "array", "items": {"type": "object", "fields": [
+                        {"name": "name", "type": "string"},
+                        {"name": "active", "type": "boolean"},
+                        {"name": "account_id", "type": "string"},
+                        {"name": "client_id", "type": "string"},
+                        {"name": "configured", "type": "boolean"}
+                    ]}},
+                    {"name": "total", "type": "integer"}
+                ]
+            },
+            {
+                "name": "profile use",
+                "description": "Select the default profile",
+                "mutating": true,
+                "output_fields": [
+                    {"name": "profile", "type": "string"},
+                    {"name": "active", "type": "boolean"}
+                ],
+                "args": [
+                    {"name": "name", "type": "string", "required": true, "description": "Profile name to select"}
+                ]
+            },
+            {
+                "name": "profile remove",
+                "description": "Remove a profile",
+                "mutating": true,
+                "output_fields": [
+                    {"name": "profile", "type": "string"},
+                    {"name": "removed", "type": "boolean"}
+                ],
+                "args": [
+                    {"name": "name", "type": "string", "required": true, "description": "Profile name to remove"},
+                    {"name": "--yes", "type": "boolean", "default": false, "description": "Confirm profile removal"}
+                ]
+            },
+            {
+                "name": "doctor",
+                "description": "Check configuration and Zoom connectivity",
+                "mutating": false,
+                "output_fields": [
+                    {"name": "ok", "type": "boolean"},
+                    {"name": "offline", "type": "boolean"},
+                    {"name": "checks", "type": "array", "items": {"type": "object", "fields": [
+                        {"name": "name", "type": "string"},
+                        {"name": "ok", "type": "boolean"},
+                        {"name": "detail", "type": "string"}
+                    ]}}
+                ],
+                "args": [
+                    {"name": "--offline", "type": "boolean", "default": false, "description": "Check local configuration without contacting Zoom"}
                 ]
             },
             {
@@ -559,7 +667,7 @@ fn enrich_v0_3(schema: &mut serde_json::Value) {
         }
         if matches!(
             name.as_str(),
-            "meetings delete" | "recordings delete" | "config delete"
+            "meetings delete" | "recordings delete" | "config delete" | "profile remove"
         ) {
             object.insert(
                 "confirmation_bypass_arg".into(),

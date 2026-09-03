@@ -58,12 +58,23 @@ enum Command {
     #[command(subcommand, arg_required_else_help = true)]
     Config(ConfigCommand),
 
-    /// Set up credentials interactively (or print JSON schema for agents)
-    Init {
-        /// Profile name to create or update (default: "default")
+    /// Manage authentication
+    #[command(subcommand, arg_required_else_help = true)]
+    Auth(AuthCommand),
+
+    /// Manage configuration profiles
+    #[command(subcommand, arg_required_else_help = true)]
+    Profile(ProfileCommand),
+
+    /// Check configuration and Zoom connectivity
+    Doctor {
+        /// Check local configuration without contacting Zoom
         #[arg(long)]
-        profile: Option<String>,
+        offline: bool,
     },
+
+    /// Set up credentials interactively (or print JSON schema for agents)
+    Init,
 
     /// Print machine-readable clispec v0.3 schema
     Schema,
@@ -79,6 +90,8 @@ enum Command {
 enum ConfigCommand {
     /// Show current configuration: profiles, active profile, and env overrides
     Show,
+    /// Print the configuration file path
+    Path,
     /// Delete a profile from the config file
     Delete {
         /// Profile name to delete
@@ -86,6 +99,39 @@ enum ConfigCommand {
         /// Skip confirmation prompt
         #[arg(long)]
         force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuthCommand {
+    /// Configure credentials interactively and verify them
+    Login,
+    /// Show whether credentials are configured and valid
+    Status {
+        /// Check local configuration without contacting Zoom
+        #[arg(long)]
+        offline: bool,
+    },
+    /// Remove the stored client secret for the selected profile
+    Logout,
+}
+
+#[derive(Subcommand)]
+enum ProfileCommand {
+    /// List configured profiles
+    List,
+    /// Select the default profile
+    Use {
+        /// Profile name to select
+        name: String,
+    },
+    /// Remove a profile
+    Remove {
+        /// Profile name to remove
+        name: String,
+        /// Confirm profile removal
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -338,17 +384,53 @@ async fn main() {
             commands::config::show(cli.profile.as_deref(), &out);
             return;
         }
+        Command::Config(ConfigCommand::Path) => {
+            commands::config::path(&out);
+            return;
+        }
         Command::Config(ConfigCommand::Delete { profile, force }) => {
             if let Err(e) = commands::config::delete(profile, *force, &out) {
-                eprintln!("{}", e.to_structured_json());
-                std::process::exit(exit_codes::for_error(&e));
+                exit_with_error(&e);
             }
             return;
         }
-        Command::Init { profile } => {
-            if let Err(e) = commands::init::init(profile.clone()).await {
-                eprintln!("{}", e.to_structured_json());
-                std::process::exit(exit_codes::for_error(&e));
+        Command::Auth(AuthCommand::Login) | Command::Init => {
+            if let Err(e) = commands::auth::login(cli.profile.clone()).await {
+                exit_with_error(&e);
+            }
+            return;
+        }
+        Command::Auth(AuthCommand::Status { offline }) => {
+            if let Err(e) = commands::auth::status(cli.profile.clone(), *offline, &out).await {
+                exit_with_error(&e);
+            }
+            return;
+        }
+        Command::Auth(AuthCommand::Logout) => {
+            if let Err(e) = commands::auth::logout(cli.profile.as_deref(), &out) {
+                exit_with_error(&e);
+            }
+            return;
+        }
+        Command::Profile(ProfileCommand::List) => {
+            commands::config::list_profiles(cli.profile.as_deref(), &out);
+            return;
+        }
+        Command::Profile(ProfileCommand::Use { name }) => {
+            if let Err(e) = commands::config::use_profile(name, &out) {
+                exit_with_error(&e);
+            }
+            return;
+        }
+        Command::Profile(ProfileCommand::Remove { name, yes }) => {
+            if let Err(e) = commands::config::remove_profile(name, *yes, &out) {
+                exit_with_error(&e);
+            }
+            return;
+        }
+        Command::Doctor { offline } => {
+            if let Err(e) = commands::doctor::run(cli.profile.clone(), *offline, &out).await {
+                exit_with_error(&e);
             }
             return;
         }
@@ -546,8 +628,13 @@ async fn main() {
             }
             WebinarsCommand::Get { id } => commands::webinars::get(&mut client, &out, id).await,
         },
-        Command::Config(ConfigCommand::Show | ConfigCommand::Delete { .. })
-        | Command::Init { .. }
+        Command::Config(
+            ConfigCommand::Show | ConfigCommand::Path | ConfigCommand::Delete { .. },
+        )
+        | Command::Auth(_)
+        | Command::Profile(_)
+        | Command::Doctor { .. }
+        | Command::Init
         | Command::Schema
         | Command::Completions { .. } => {
             unreachable!()
@@ -558,4 +645,9 @@ async fn main() {
         eprintln!("{}", e.to_structured_json());
         std::process::exit(exit_codes::for_error(&e));
     }
+}
+
+fn exit_with_error(error: &api::ApiError) -> ! {
+    eprintln!("{}", error.to_structured_json());
+    std::process::exit(exit_codes::for_error(error));
 }

@@ -102,6 +102,12 @@ impl ZoomClient {
         Ok(self.token.as_deref().unwrap())
     }
 
+    /// Verify the configured Server-to-Server OAuth credentials without
+    /// requiring a resource-specific API scope.
+    pub async fn verify_credentials(&mut self) -> Result<(), ApiError> {
+        self.ensure_token().await.map(|_| ())
+    }
+
     async fn fetch_token(&self) -> Result<String, ApiError> {
         let creds = BASE64.encode(format!("{}:{}", self.client_id, self.client_secret));
         let url = format!(

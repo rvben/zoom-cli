@@ -27,6 +27,9 @@ curl -fsSL https://github.com/rvben/zoom-cli/releases/latest/download/zoom-$(una
 # Interactive setup (creates config with your Zoom OAuth credentials)
 zoom init
 
+# Verify the active profile against Zoom
+zoom auth status
+
 # List your upcoming meetings
 zoom meetings list
 
@@ -47,6 +50,8 @@ zoom users me
 `~/.config/zoom-cli/config.toml`
 
 ```toml
+active_profile = "default"
+
 [default]
 account_id = "YOUR_ACCOUNT_ID"
 client_id = "YOUR_CLIENT_ID"
@@ -72,6 +77,26 @@ Requires a [Zoom Server-to-Server OAuth app](https://marketplace.zoom.us/develop
 ### Precedence
 
 CLI flags > environment variables > config file
+
+Use the same account workflow as the other enterprise CLIs:
+
+```bash
+zoom init --profile work
+zoom auth login --profile work
+zoom auth status [--offline] --profile work
+zoom auth logout --profile work
+zoom profile list
+zoom profile use work
+zoom profile remove work --yes
+zoom config show
+zoom config path
+zoom doctor [--offline]
+```
+
+`auth status` and `doctor` verify credentials against Zoom by default. Their
+`--offline` option validates only local configuration. `auth logout` removes
+the stored client secret but preserves the rest of the profile. Environment
+variables still take precedence and cannot be removed by the CLI.
 
 ## Commands
 
@@ -132,9 +157,17 @@ CLI flags > environment variables > config file
 | Command | Description |
 |---------|-------------|
 | `zoom init [--profile <name>]` | Set up credentials interactively |
+| `zoom auth login [--profile <name>]` | Configure and verify credentials (`init` is retained as an alias) |
+| `zoom auth status [--offline] [--profile <name>]` | Check authentication state |
+| `zoom auth logout [--profile <name>]` | Remove the selected profile's stored client secret |
+| `zoom profile list` | List profiles |
+| `zoom profile use <name>` | Select the default profile |
+| `zoom profile remove <name> --yes` | Remove a profile |
 | `zoom config show` | Show current configuration |
+| `zoom config path` | Print the configuration file path |
 | `zoom config delete <profile> [--force]` | Delete a profile |
-| `zoom schema <resource>` | Print field reference for a resource (meetings, recordings, users, reports, webinars) |
+| `zoom doctor [--offline]` | Check configuration and Zoom connectivity |
+| `zoom schema` | Print the machine-readable command schema |
 | `zoom completions <shell>` | Generate shell completions (bash, zsh, fish, elvish, powershell) |
 
 ## Shell Completions
@@ -163,10 +196,12 @@ zoom meetings list --json | jq '.[].topic'
 ### Schema introspection
 
 ```bash
-zoom schema meetings | jq '.fields'
+zoom schema | jq '.commands[] | select(.name == "meetings list")'
 ```
 
-The `schema` command outputs a JSON description of resource fields and types -- enabling AI agents to discover operations without parsing help text.
+The `schema` command outputs a JSON description of commands, arguments, and
+result fields -- enabling agents to discover operations without parsing help
+text.
 
 ### Exit codes
 
