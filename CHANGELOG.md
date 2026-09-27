@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.9](https://github.com/rvben/zoom-cli/compare/v0.2.8...v0.2.9) - 2026-09-27
+
+### Fixed
+
+- **deps**: update rustls to 0.23.45 for RUSTSEC-2026-0285 ([33ca679](https://github.com/rvben/zoom-cli/commit/33ca67951363d7400ad5e5b6c65dd077477f9505))
+
 ## [0.2.8](https://github.com/rvben/zoom-cli/compare/v0.2.7...v0.2.8) - 2026-09-03
 
 ### Added
