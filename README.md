@@ -10,6 +10,14 @@ A command-line interface for the [Zoom API](https://developers.zoom.us/docs/api/
 
 ## Install
 
+### Homebrew
+
+```sh
+brew install rvben/tap/zoom-cli
+```
+
+### Other installation methods
+
 ```bash
 # From crates.io
 cargo install zoom-cli
